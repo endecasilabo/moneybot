@@ -42,38 +42,26 @@ Cloud SQL Postgres. El proceso aplica `schema.sql` al arrancar (`CREATE TABLE IF
 
 ## Deploy
 
-Todo pasa por el Makefile. `make test` corre los tests. `make release` corre los tests y manda el build a Cloud Build. Cloud Build construye `bot:latest`, la sube a Artifact Registry y, si los jobs ya existen, actualiza `moneybot-trade` y `moneybot-snapshot`.
+No se corre nada en la máquina local. Todo es un workflow de GitHub.
 
-El proyecto GCP ya existe. Región default `us-central1` (Cloud Scheduler tiene que existir en esa región). Cloud SQL `db-f1-micro` queda prendido: no escala a cero. `deletion_protection` está en true. Para borrar la instancia, primero pasalo a false y aplicá de nuevo.
+El proyecto GCP ya existe. Región default `us-central1` (Cloud Scheduler tiene que existir ahí). Cloud SQL `db-f1-micro` queda prendido: no escala a cero. `deletion_protection` está en true.
 
-El state de Terraform guarda el password de la base. No lo subas a un repo. Las keys de Alpaca no van al Terraform ni al repo.
+En la consola de GCP, creá una service account con rol Owner y bajá el JSON. En el repo, Settings, Secrets and variables, Actions, cargá:
 
-```bash
-make infra PROJECT_ID=TU_PROYECTO GITHUB_REPOSITORY=owner/moneybot
-```
-
-Ese apply crea Artifact Registry, Cloud SQL, Cloud Build, la cuenta de GitHub Actions y los secretos vacíos de Alpaca. No crea los jobs. Si falla porque la cuenta de Cloud Build o el service agent de Scheduler todavía no existen, corré el mismo comando de nuevo.
-
-```bash
-export ALPACA_KEY=APCA_API_KEY_ID
-export ALPACA_SECRET=APCA_API_SECRET_KEY
-make secrets PROJECT_ID=TU_PROYECTO
-make release PROJECT_ID=TU_PROYECTO
-make jobs PROJECT_ID=TU_PROYECTO
-```
-
-`make release` empuja la imagen. `make jobs` crea los dos Cloud Run Jobs y los Scheduler apuntando a `bot:latest`. Las versiones de Alpaca tienen que existir antes de `make jobs`.
-
-En GitHub, el workflow `.github/workflows/ci.yml` corre `make test` en cada push y PR. En `main`, y con `workflow_dispatch`, corre `make deploy`. Hacen falta estos secrets, con los outputs `wif_provider` y `ci_service_account`:
-
-- `WIF_PROVIDER`
-- `WIF_SERVICE_ACCOUNT`
+- `GCP_SA_KEY`: el JSON entero
 - `GCP_PROJECT_ID`
+- `ALPACA_KEY`
+- `ALPACA_SECRET`
 
-Cambiar `config/bot.yaml` (incluido `trading_enabled: true`) exige otro `make release`.
+La región es la variable `GCP_REGION`. Si no está, los workflows usan `us-central1`.
 
-## Tests
+El state de Terraform vive en el bucket `PROJECT_ID-moneybot-tfstate`. El password de la base queda en ese state, no en el repo. Las keys de Alpaca quedan en GitHub Secrets y en Secret Manager.
 
-```bash
-make test
-```
+Orden, desde Actions, Run workflow:
+
+1. `ops`, acción `infra`. Crea Artifact Registry, Cloud SQL, Cloud Build y los secretos vacíos. No crea los jobs. Si falla porque la cuenta de Cloud Build o el service agent de Scheduler todavía no existen, corré `infra` de nuevo.
+2. `ops`, acción `secrets`. Carga las keys de Alpaca en Secret Manager.
+3. Un push a `main` corre `ci`: tests y Cloud Build. Cloud Build publica `bot:latest` y, si los jobs ya existen, los actualiza.
+4. `ops`, acción `jobs`. Crea `moneybot-trade`, `moneybot-snapshot` y los dos Scheduler apuntando a esa imagen.
+
+Cada push y cada PR corre los tests. Cada push a `main` vuelve a publicar la imagen. Cambiar `config/bot.yaml` (incluido `trading_enabled: true`) es un push a `main`.
