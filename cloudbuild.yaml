@@ -1,0 +1,30 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/moneybot/bot:latest
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/moneybot/bot:latest
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        image="${_REGION}-docker.pkg.dev/$PROJECT_ID/moneybot/bot:latest"
+        for job in moneybot-trade moneybot-snapshot; do
+          if gcloud run jobs describe "$$job" --region "${_REGION}" --project "$PROJECT_ID" >/dev/null 2>&1; then
+            gcloud run jobs update "$$job" --image "$$image" --region "${_REGION}" --project "$PROJECT_ID"
+          else
+            echo "$$job does not exist yet. Run: make jobs PROJECT_ID=$PROJECT_ID REGION=${_REGION}"
+          fi
+        done
+substitutions:
+  _REGION: us-central1
+options:
+  logging: CLOUD_LOGGING_ONLY
+timeout: 1200s
