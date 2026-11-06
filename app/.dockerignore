@@ -1,0 +1,16 @@
+# Read by docker build -f app/Dockerfile because it sits next to that Dockerfile.
+# Paths are relative to the repo root, which is the build context.
+*
+
+!app/
+!app/requirements.txt
+!app/entrypoint.py
+
+!src/
+!src/*.py
+
+!config/
+!config/*.yml
+
+**/__pycache__
+**/*.pyc

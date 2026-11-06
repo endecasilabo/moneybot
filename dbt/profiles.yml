@@ -1,0 +1,13 @@
+moneybot:
+  target: cloudsql
+  outputs:
+    cloudsql:
+      type: postgres
+      host: 127.0.0.1
+      port: 5432
+      user: moneybot
+      password: "{{ env_var('DB_PASSWORD') }}"
+      dbname: moneybot
+      schema: public
+      threads: 1
+      sslmode: disable

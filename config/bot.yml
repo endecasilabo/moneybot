@@ -1,0 +1,15 @@
+# Live only. A paper URL, or mode other than live, aborts the process.
+mode: live
+# false stores the signal and does not send the order.
+trading_enabled: false
+symbol: SPY
+# Fixed shares per entry. The published chart buys one unit.
+# Cash must cover qty times the last price. No margin. No fractional CLS.
+qty: 1
+trend_window: 200
+exit_window: 5
+down_days: 3
+# Submit only when minutes until the close are inside (10, this value].
+# Alpaca rejects a CLS order inside the last 10 minutes.
+submit_before_close_minutes: 20
+feed: sip
