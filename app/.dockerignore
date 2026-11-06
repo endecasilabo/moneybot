@@ -3,11 +3,5 @@
 
 !app/requirements.txt
 !app/entrypoint.py
-
-!src
-!src/**
-!config
-!config/**
-
-**/__pycache__
-**/*.pyc
+!src/*.py
+!config/*.yml
