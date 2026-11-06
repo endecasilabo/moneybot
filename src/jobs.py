@@ -394,7 +394,7 @@ def aware(value: datetime) -> datetime:
 
 
 def config_path() -> Path:
-    return Path(os.environ.get("BOT_CONFIG", "config/bot.yaml"))
+    return Path(os.environ.get("BOT_CONFIG", "config/bot.yml"))
 
 
 def _text(raw: dict[str, Any], key: str) -> str:

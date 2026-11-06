@@ -53,4 +53,4 @@ jobs:
         run: |
           region="${REGION:-us-central1}"
           test -n "$PROJECT_ID" || { echo "PROJECT_ID is required"; exit 1; }
-          gcloud builds submit --project "$PROJECT_ID" --config .github/cloudbuild.yaml --substitutions "_REGION=${region}"
+          gcloud builds submit --project "$PROJECT_ID" --config .github/cloudbuild.yml --substitutions "_REGION=${region}"

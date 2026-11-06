@@ -30,7 +30,7 @@ Also:
 - The same order is not sent twice. `client_order_id` is `scherman-spy-{buy|sell}-{date}`.
 - The last trade must be under 5 minutes old, and the feed must be SIP. A stale trade or an IEX close aborts the run and sends nothing.
 
-`trading_enabled` starts as `false` in [`config/bot.yaml`](config/bot.yaml). `false` stores the signal and does not send the order. Set it to `true`, push to `main`, and the new image picks it up.
+`trading_enabled` starts as `false` in [`config/bot.yml`](config/bot.yml). `false` stores the signal and does not send the order. Set it to `true`, push to `main`, and the new image picks it up.
 
 `mode` other than `live`, or `APCA_API_BASE_URL` containing `paper`, aborts the process.
 
@@ -85,7 +85,7 @@ From **Actions → Run workflow**, in this order:
 4. A push to `main` runs **deploy**: tests, then Cloud Build. Cloud Build publishes `bot:latest` and updates a job when that job already exists.
 5. Workflow **infra**, action `jobs`. Creates `moneybot-trade`, `moneybot-snapshot`, and the two schedulers on that image.
 
-Every push and every pull request runs the tests. Every push to `main` publishes the image again. Changing [`config/bot.yaml`](config/bot.yaml), including `trading_enabled: true`, is a push to `main`.
+Every push and every pull request runs the tests. Every push to `main` publishes the image again. Changing [`config/bot.yml`](config/bot.yml), including `trading_enabled: true`, is a push to `main`.
 
 ## Infrastructure
 
@@ -163,4 +163,4 @@ The Cloud Build account and the Scheduler agent do not exist until their APIs ha
 - The state bucket. The Infra workflow creates `PROJECT_ID-moneybot-tfstate` before apply.
 - Alpaca secret versions. The Infra workflow action `secrets` adds them.
 - Tables. dbt in [`dbt/`](dbt) creates a table only when it is missing.
-- The container image. [`.github/cloudbuild.yaml`](.github/cloudbuild.yaml) builds [`app/Dockerfile`](app/Dockerfile) with the repo root as context, so the image can copy `app/`, `src/`, and `config/`. [`.gcloudignore`](.gcloudignore) stays at the repo root because that is the directory `gcloud` uploads, and it keeps only those paths.
+- The container image. [`.github/cloudbuild.yml`](.github/cloudbuild.yml) builds [`app/Dockerfile`](app/Dockerfile) with the repo root as context, so the image can copy `app/`, `src/`, and `config/`. [`.gcloudignore`](.gcloudignore) stays at the repo root because that is the directory `gcloud` uploads. It is a copy of [`.gitignore`](.gitignore). [`app/Dockerfile.dockerignore`](app/Dockerfile.dockerignore) sits next to the Dockerfile because Docker only reads `<Dockerfile>.dockerignore` for `-f app/Dockerfile`.

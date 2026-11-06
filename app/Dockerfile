@@ -10,7 +10,7 @@ COPY app/entrypoint.py ./entrypoint.py
 COPY src ./src
 COPY config ./config
 
-ENV BOT_CONFIG=/app/config/bot.yaml
+ENV BOT_CONFIG=/app/config/bot.yml
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 

@@ -192,7 +192,7 @@ resource "google_cloud_run_v2_job" "bot" {
 
         env {
           name  = "BOT_CONFIG"
-          value = "/app/config/bot.yaml"
+          value = "/app/config/bot.yml"
         }
         env {
           name  = "INSTANCE_CONNECTION_NAME"
