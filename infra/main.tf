@@ -1,56 +1,12 @@
-terraform {
-  required_version = ">= 1.5"
-  backend "gcs" {}
-  required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 6.0"
-    }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.6"
-    }
-  }
-}
-
-provider "google" {
-  project = var.project_id
-  region  = var.region
-}
-
-variable "project_id" {
-  type = string
-}
-
-variable "region" {
-  type    = string
-  default = "us-central1"
-}
-
-variable "image" {
-  type        = string
-  default     = ""
-  description = "Image URI with tag. Empty skips the Cloud Run jobs and the schedulers."
-}
-
-variable "trade_cron" {
-  type    = string
-  default = "*/5 12-16 * * 1-5"
-}
-
-variable "snapshot_cron" {
-  type    = string
-  default = "*/15 9-16 * * 1-5"
-}
-
-variable "db_tier" {
-  type    = string
-  default = "db-f1-micro"
-}
+# Two applies, same config:
+#   infra — registry, Cloud SQL, empty Alpaca secrets, IAM. image is empty, so no jobs.
+#   jobs  — same, plus Cloud Run jobs and Scheduler once image is set.
+# Alpaca secret values are not here. The Infra workflow action secrets writes those versions.
 
 data "google_project" "this" {}
 
 locals {
+  # One entry per Cloud Run job. args is the moneybot subcommand.
   jobs = {
     trade = {
       args = ["trade"]
@@ -62,7 +18,12 @@ locals {
     }
   }
   active_jobs = { for name, job in local.jobs : name => job if var.image != "" }
+  # Google-managed identities. Each one appears only after its API has been used once.
+  cloudbuild_sa   = "${data.google_project.this.number}@cloudbuild.gserviceaccount.com"
+  scheduler_agent = "serviceAccount:service-${data.google_project.this.number}@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
 }
+
+# Leave them on if this config is destroyed. Other things in the project may use them.
 
 resource "google_project_service" "apis" {
   for_each = toset([
@@ -78,6 +39,8 @@ resource "google_project_service" "apis" {
   disable_on_destroy = false
 }
 
+# Cloud Build pushes bot:latest here. The job service account only pulls.
+
 resource "google_artifact_registry_repository" "bot" {
   location      = var.region
   repository_id = "moneybot"
@@ -85,38 +48,12 @@ resource "google_artifact_registry_repository" "bot" {
   depends_on    = [google_project_service.apis]
 }
 
+# The job connects through the Cloud SQL volume at /cloudsql, not over the public address.
+# The password lives in Secret Manager and also in this state.
+
 resource "random_password" "db" {
   length  = 32
   special = false
-}
-
-resource "google_secret_manager_secret" "db_password" {
-  secret_id = "moneybot-db-password"
-  replication {
-    auto {}
-  }
-  depends_on = [google_project_service.apis]
-}
-
-resource "google_secret_manager_secret_version" "db_password" {
-  secret      = google_secret_manager_secret.db_password.id
-  secret_data = random_password.db.result
-}
-
-resource "google_secret_manager_secret" "alpaca_key" {
-  secret_id = "moneybot-alpaca-key"
-  replication {
-    auto {}
-  }
-  depends_on = [google_project_service.apis]
-}
-
-resource "google_secret_manager_secret" "alpaca_secret" {
-  secret_id = "moneybot-alpaca-secret"
-  replication {
-    auto {}
-  }
-  depends_on = [google_project_service.apis]
 }
 
 resource "google_sql_database_instance" "main" {
@@ -137,6 +74,8 @@ resource "google_sql_database_instance" "main" {
   depends_on = [google_project_service.apis]
 }
 
+# Database and user the bot connects as. The password is the random value above.
+
 resource "google_sql_database" "bot" {
   name     = "moneybot"
   instance = google_sql_database_instance.main.name
@@ -147,6 +86,42 @@ resource "google_sql_user" "bot" {
   instance = google_sql_database_instance.main.name
   password = random_password.db.result
 }
+
+resource "google_secret_manager_secret" "db_password" {
+  secret_id = "moneybot-db-password"
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.apis]
+}
+
+# Terraform writes this version. Alpaca secrets stay empty until the Infra workflow action secrets.
+
+resource "google_secret_manager_secret_version" "db_password" {
+  secret      = google_secret_manager_secret.db_password.id
+  secret_data = random_password.db.result
+}
+
+# Empty shells. The Infra workflow action secrets writes the Alpaca versions. Terraform does not.
+
+resource "google_secret_manager_secret" "alpaca_key" {
+  secret_id = "moneybot-alpaca-key"
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_secret_manager_secret" "alpaca_secret" {
+  secret_id = "moneybot-alpaca-secret"
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.apis]
+}
+
+# job: the Cloud Run process. Reads SQL, secrets, and the image.
+# scheduler: Cloud Scheduler calls jobs.run as this account.
 
 resource "google_service_account" "job" {
   account_id   = "moneybot-job"
@@ -189,12 +164,16 @@ resource "google_artifact_registry_repository_iam_member" "job_reader" {
   member     = "serviceAccount:${google_service_account.job.email}"
 }
 
+# Scheduler's own service agent mints the OAuth token for moneybot-scheduler.
+# This agent does not exist until the Scheduler API has been used once. Re-run infra if this 404s.
 resource "google_service_account_iam_member" "scheduler_token_creator" {
   service_account_id = google_service_account.scheduler.name
   role               = "roles/iam.serviceAccountTokenCreator"
-  member             = "serviceAccount:service-${data.google_project.this.number}@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
+  member             = local.scheduler_agent
   depends_on         = [google_project_service.apis]
 }
+
+# Skipped while var.image is empty. Same image, two jobs: trade and snapshot.
 
 resource "google_cloud_run_v2_job" "bot" {
   for_each = local.active_jobs
@@ -208,17 +187,12 @@ resource "google_cloud_run_v2_job" "bot" {
       max_retries     = 0
 
       containers {
-        image   = var.image
-        command = ["python", "-m", "moneybot"]
-        args    = each.value.args
+        image = var.image
+        args  = each.value.args
 
         env {
           name  = "BOT_CONFIG"
           value = "/app/config/bot.yaml"
-        }
-        env {
-          name  = "SCHEMA_PATH"
-          value = "/app/schema.sql"
         }
         env {
           name  = "INSTANCE_CONNECTION_NAME"
@@ -286,6 +260,8 @@ resource "google_cloud_run_v2_job" "bot" {
   ]
 }
 
+# POST :run with an empty JSON body. OAuth token belongs to moneybot-scheduler.
+
 resource "google_cloud_run_v2_job_iam_member" "invoker" {
   for_each = local.active_jobs
   name     = google_cloud_run_v2_job.bot[each.key].name
@@ -322,9 +298,9 @@ resource "google_cloud_scheduler_job" "bot" {
   ]
 }
 
-locals {
-  cloudbuild_sa = "${data.google_project.this.number}@cloudbuild.gserviceaccount.com"
-}
+# Pushes the image, then updates a job only if that job already exists.
+# serviceAccountUser is required because the job runs as moneybot-job.
+# The Cloud Build service account appears after the API is enabled. Re-run infra if this 404s.
 
 resource "google_artifact_registry_repository_iam_member" "cloudbuild_writer" {
   location   = google_artifact_registry_repository.bot.location
@@ -341,6 +317,8 @@ resource "google_project_iam_member" "cloudbuild_run" {
   depends_on = [google_project_service.apis]
 }
 
+# Cloud Build writes its own build logs. Without this, the build fails after the push.
+
 resource "google_project_iam_member" "cloudbuild_logs" {
   project    = var.project_id
   role       = "roles/logging.logWriter"
@@ -353,12 +331,4 @@ resource "google_service_account_iam_member" "cloudbuild_runs_as_job" {
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${local.cloudbuild_sa}"
   depends_on         = [google_project_service.apis]
-}
-
-output "image_repository" {
-  value = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.bot.repository_id}/bot"
-}
-
-output "instance_connection_name" {
-  value = google_sql_database_instance.main.connection_name
 }

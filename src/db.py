@@ -6,7 +6,7 @@ from pathlib import Path
 import psycopg
 from psycopg.types.json import Json
 
-from moneybot.strategy import Decision
+from src.strategy import Decision
 
 
 def require_env(name: str) -> str:
@@ -27,14 +27,6 @@ def connect() -> psycopg.Connection:
         connect_timeout=10,
         autocommit=True,
     )
-
-
-def apply_schema(conn: psycopg.Connection, path: Path) -> None:
-    script = path.read_text()
-    for statement in script.split(";"):
-        sql = statement.strip()
-        if sql:
-            conn.execute(sql)
 
 
 def start_run(conn: psycopg.Connection, job: str) -> int:

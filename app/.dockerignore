@@ -1,0 +1,13 @@
+# Ignore everything. The exceptions below are the image. Paths are relative to the repo root.
+*
+
+!app/requirements.txt
+!app/entrypoint.py
+
+!src
+!src/**
+!config
+!config/**
+
+**/__pycache__
+**/*.pyc

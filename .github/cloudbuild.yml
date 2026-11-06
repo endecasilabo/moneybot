@@ -2,6 +2,8 @@ steps:
   - name: gcr.io/cloud-builders/docker
     args:
       - build
+      - -f
+      - app/Dockerfile
       - -t
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/moneybot/bot:latest
       - .
@@ -20,7 +22,7 @@ steps:
           if gcloud run jobs describe "$$job" --region "${_REGION}" --project "$PROJECT_ID" >/dev/null 2>&1; then
             gcloud run jobs update "$$job" --image "$$image" --region "${_REGION}" --project "$PROJECT_ID"
           else
-            echo "$$job does not exist yet. Run: make jobs PROJECT_ID=$PROJECT_ID REGION=${_REGION}"
+            echo "$$job does not exist yet. Run the Infra workflow with action jobs."
           fi
         done
 substitutions:

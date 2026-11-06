@@ -1,67 +1,166 @@
 # moneybot
 
-Bot de Alpaca que opera **SPY en live** con el patrón publicado de Iván Scherman, y un job aparte que solo guarda el estado de la cuenta.
+> Live Alpaca bot for **SPY**. It follows the market-on-close pattern Iván Scherman described publicly, and a second job only records the account. Nothing here runs on your laptop. GitHub Actions builds, migrates, and deploys it.
 
-El 491% de 2023 es el World Cup de futuros. Esos modelos no están publicados. Este repo implementa el patrón de la [entrevista de Business Insider](https://www.businessinsider.com/stock-trading-strategy-quant-fund-manager-competition-champion-sp500-return-2024-9): Scherman dice que su fondo no lo opera, y que la réplica cercana es el ETF SPY. La ejecución es la opción 1 de esa nota: market-on-close.
+The 491% from 2023 is the futures World Cup. Those models are not published. This repo is the close replica from the [Business Insider interview](https://www.businessinsider.com/stock-trading-strategy-quant-fund-manager-competition-champion-sp500-return-2024-9): Scherman says his fund does not trade it, and the near copy is the SPY ETF. Execution is option 1 from that note, a market-on-close order.
 
-## Reglas
+## Contents
 
-- Tendencia: la SMA de 200 de hoy (el último trade cuenta como cierre) es mayor que la SMA de 200 de ayer.
-- Entrada: hoy es el tercer día bajista. Los dos cierres anteriores ya bajaron, y el último precio está debajo del cierre de ayer. Orden `cls` de `qty` acciones.
-- Salida: hay posición long, y el último precio está arriba de la SMA de 5. Orden `cls` de toda la posición.
-- Sin stop. El tamaño es fijo (`qty`, default 1). Si el cash no cubre `qty * último precio`, no compra. No usa margen. No fracciona: Alpaca rechaza fracciones con `cls`.
-- Una posición. Si ya está long, no compra. Si está flat, no vende.
-- Idempotencia: `client_order_id = scherman-spy-{buy|sell}-{fecha}`.
+- [Rules](#rules)
+- [Two jobs](#two-jobs)
+- [Data](#data)
+- [Deploy](#deploy)
+- [Infrastructure](#infrastructure)
 
-El cierre oficial todavía no existe cuando el job decide. Usa el último trade como proxy. La subasta puede llenar a otro precio. Hace falta SIP en tiempo real. Si el último trade tiene más de 5 minutos, el job falla y no manda la orden. Si la cuenta no tiene SIP, falla y no opera con cierres IEX.
+## Rules
 
-`trading_enabled` nace en `false`. Con `false` guarda la señal y no manda la orden. Pasa a `true` en `config/bot.yaml`, reconstruí la imagen y volvé a desplegar el job.
+The signal uses the last trade as today's close. The official close does not exist yet when the job decides. The auction can fill at a different price.
 
-`mode` distinto de `live`, o `APCA_API_BASE_URL` con `paper`, aborta el proceso.
+| Check | Action |
+| --- | --- |
+| Today's 200-day SMA is above yesterday's | Trend is on. The last trade counts as today's close |
+| Third down day, and the last price is under yesterday's close | Buy `qty` shares with a `cls` order |
+| Long, and the last price is above the 5-day SMA | Sell the whole position with a `cls` order |
+| Anything else | Hold |
 
-## Dos ejecuciones
+Also:
 
-Misma imagen, dos Cloud Run Jobs, dos Cloud Scheduler en `America/New_York`.
+- No stop. Size is fixed (`qty`, default 1). If cash cannot cover `qty` times the last price, it does not buy. No margin. No fractions. Alpaca rejects a fractional `cls` order.
+- One position. Already long means no buy. Flat means no sell.
+- The same order is not sent twice. `client_order_id` is `scherman-spy-{buy|sell}-{date}`.
+- The last trade must be under 5 minutes old, and the feed must be SIP. A stale trade or an IEX close aborts the run and sends nothing.
 
-| Job | Cron default | Qué hace |
+`trading_enabled` starts as `false` in [`config/bot.yaml`](config/bot.yaml). `false` stores the signal and does not send the order. Set it to `true`, push to `main`, and the new image picks it up.
+
+`mode` other than `live`, or `APCA_API_BASE_URL` containing `paper`, aborts the process.
+
+## Two jobs
+
+One image. Two Cloud Run jobs. Two Cloud Scheduler triggers in `America/New_York`.
+
+| Job | Default cron | What it does |
 | --- | --- | --- |
-| `moneybot-trade` | `*/5 12-16 * * 1-5` | Manda la orden solo si faltan más de 10 min y como máximo 20 min para `next_close`. Cubre el cierre de las 16:00 ET y el cierre temprano de las 13:00 ET. Fuera de esa ventana no toca órdenes. |
-| `moneybot-snapshot` | `*/15 9-16 * * 1-5` | Lee cuenta, posiciones y órdenes abiertas. No decide y no opera. |
+| `moneybot-trade` | `*/5 12-16 * * 1-5` | Sends the order only when the close is more than 10 and at most 20 minutes away. That covers the 16:00 ET close and the 13:00 ET early close. Outside that window it does not touch orders |
+| `moneybot-snapshot` | `*/15 9-16 * * 1-5` | Reads the account, positions, and open orders. It does not decide and it does not trade |
 
-Los cron son variables de Terraform. Si el job de trade no corre dentro de la ventana, esa sesión no se opera.
+The crons are Terraform variables. If the trade job does not run inside the window, that session is not traded.
 
-## Datos
+The picture of GCP, and which file owns which resource, is in [Infrastructure](#infrastructure).
 
-Cloud SQL Postgres. El proceso aplica `schema.sql` al arrancar (`CREATE TABLE IF NOT EXISTS`).
+## Data
 
-- `runs`: cada ejecución.
-- `signals`: precio, las dos SMA de 200, la SMA de 5, flags, acción y motivo.
-- `orders`: órdenes `cls` enviadas.
-- `account_snapshots`: equity, cash, buying power y órdenes abiertas.
-- `position_snapshots`: posiciones.
+Cloud SQL Postgres. dbt creates the tables with `dbt build`. If a table already exists, dbt leaves it alone. A later column change is not applied to an existing table.
+
+| Table | One row is |
+| --- | --- |
+| `runs` | One execution of either job |
+| `signals` | The price, both 200-day SMAs, the 5-day SMA, the flags, the action, and the reason |
+| `orders` | A `cls` order sent to Alpaca |
+| `account_snapshots` | Equity, cash, buying power, and open orders |
+| `position_snapshots` | One open position |
+
+Models and column tests are in [`dbt/`](dbt).
 
 ## Deploy
 
-No se corre nada en la máquina local. Todo es un workflow de GitHub.
+The GCP project already exists. The default region is `us-central1`. Cloud Scheduler must be available there. Cloud SQL `db-f1-micro` stays on. It does not scale to zero. `deletion_protection` is true.
 
-El proyecto GCP ya existe. Región default `us-central1` (Cloud Scheduler tiene que existir ahí). Cloud SQL `db-f1-micro` queda prendido: no escala a cero. `deletion_protection` está en true.
+Create a service account with the Owner role and download the JSON. In the repo, open **Settings → Secrets and variables → Actions** and add:
 
-En la consola de GCP, creá una service account con rol Owner y bajá el JSON. En el repo, Settings, Secrets and variables, Actions, cargá:
+| Name | Kind | Value |
+| --- | --- | --- |
+| `GCP_SA_KEY` | secret | The whole JSON key |
+| `GCP_PROJECT_ID` | secret | The project id |
+| `ALPACA_KEY` | secret | Alpaca key |
+| `ALPACA_SECRET` | secret | Alpaca secret |
+| `GCP_REGION` | variable | Optional. Workflows use `us-central1` when it is empty |
 
-- `GCP_SA_KEY`: el JSON entero
-- `GCP_PROJECT_ID`
-- `ALPACA_KEY`
-- `ALPACA_SECRET`
+Terraform state lives in the bucket `PROJECT_ID-moneybot-tfstate`. The database password is in that state and in Secret Manager, not in the repo. Alpaca keys live in GitHub Secrets and in Secret Manager.
 
-La región es la variable `GCP_REGION`. Si no está, los workflows usan `us-central1`.
+From **Actions → Run workflow**, in this order:
 
-El state de Terraform vive en el bucket `PROJECT_ID-moneybot-tfstate`. El password de la base queda en ese state, no en el repo. Las keys de Alpaca quedan en GitHub Secrets y en Secret Manager.
+1. Workflow **infra**, action `infra`. Creates Artifact Registry, Cloud SQL, Cloud Build IAM, and the empty secrets. It does not create the jobs. If it fails because the Cloud Build account or the Scheduler agent does not exist yet, run `infra` again.
+2. Workflow **infra**, action `schema`. dbt creates the tables.
+3. Workflow **infra**, action `secrets`. Loads the Alpaca keys into Secret Manager.
+4. A push to `main` runs **deploy**: tests, then Cloud Build. Cloud Build publishes `bot:latest` and updates a job when that job already exists.
+5. Workflow **infra**, action `jobs`. Creates `moneybot-trade`, `moneybot-snapshot`, and the two schedulers on that image.
 
-Orden, desde Actions, Run workflow:
+Every push and every pull request runs the tests. Every push to `main` publishes the image again. Changing [`config/bot.yaml`](config/bot.yaml), including `trading_enabled: true`, is a push to `main`.
 
-1. `ops`, acción `infra`. Crea Artifact Registry, Cloud SQL, Cloud Build y los secretos vacíos. No crea los jobs. Si falla porque la cuenta de Cloud Build o el service agent de Scheduler todavía no existen, corré `infra` de nuevo.
-2. `ops`, acción `secrets`. Carga las keys de Alpaca en Secret Manager.
-3. Un push a `main` corre `ci`: tests y Cloud Build. Cloud Build publica `bot:latest` y, si los jobs ya existen, los actualiza.
-4. `ops`, acción `jobs`. Crea `moneybot-trade`, `moneybot-snapshot` y los dos Scheduler apuntando a esa imagen.
+## Infrastructure
 
-Cada push y cada PR corre los tests. Cada push a `main` vuelve a publicar la imagen. Cambiar `config/bot.yaml` (incluido `trading_enabled: true`) es un push a `main`.
+GCP layout for moneybot. Terraform in `infra/` creates it.
+
+### What `infra/` owns
+
+| File | What it holds |
+| --- | --- |
+| [`terraform.tf`](infra/terraform.tf) | Terraform and provider version pins |
+| [`backend.tf`](infra/backend.tf) | GCS state backend. The bucket name is passed at `init` |
+| [`providers.tf`](infra/providers.tf) | Google provider, project, and region |
+| [`variables.tf`](infra/variables.tf) | Inputs. An empty `image` skips the jobs |
+| [`main.tf`](infra/main.tf) | Every resource |
+| [`outputs.tf`](infra/outputs.tf) | Image repository and Cloud SQL connection name |
+
+Two applies share this config:
+
+| Apply | `image` | What appears |
+| --- | --- | --- |
+| `infra` | empty | APIs, registry, Cloud SQL, secret shells, IAM |
+| `jobs` | `bot:latest` | The same, plus both Cloud Run jobs and both schedulers |
+
+Alpaca key values are not in Terraform. The Infra workflow action `secrets` writes those Secret Manager versions. dbt creates the tables. See [Deploy](#deploy).
+
+### Architecture
+
+```mermaid
+flowchart LR
+  actions[GitHub Actions]
+  build[Cloud Build]
+  registry[Artifact Registry]
+  trade["moneybot-trade"]
+  snapshot["moneybot-snapshot"]
+  scheduler[Cloud Scheduler]
+  secrets[Secret Manager]
+  sql[Cloud SQL]
+  dbtNode[dbt]
+  alpaca[Alpaca]
+
+  actions -->|"deploy"| build
+  build -->|"push bot:latest"| registry
+  registry --> trade
+  registry --> snapshot
+  build -->|"update job if it exists"| trade
+  build -->|"update job if it exists"| snapshot
+  scheduler -->|"POST jobs.run"| trade
+  scheduler -->|"POST jobs.run"| snapshot
+  secrets --> trade
+  secrets --> snapshot
+  trade --> sql
+  snapshot --> sql
+  trade --> alpaca
+  snapshot --> alpaca
+  actions -->|"schema"| dbtNode
+  dbtNode -->|"create missing tables"| sql
+```
+
+Scheduler and both jobs run in `America/New_York`. The job reaches Postgres through the Cloud SQL socket at `/cloudsql`, not through the instance's public address. The public IP exists so the `schema` action can open the Cloud SQL Auth Proxy from GitHub Actions.
+
+### Identities
+
+| Account | Used by | Can do |
+| --- | --- | --- |
+| `moneybot-job` | Both Cloud Run jobs | Read SQL, read the three secrets, pull the image |
+| `moneybot-scheduler` | Cloud Scheduler | Call `jobs.run` |
+| Cloud Build service account | `gcloud builds submit` | Push the image, update a job, write logs, act as `moneybot-job` |
+| Scheduler service agent | Google-managed | Mint the OAuth token for `moneybot-scheduler` |
+
+The Cloud Build account and the Scheduler agent do not exist until their APIs have been used once. If `infra` 404s on either binding, run `infra` again.
+
+### What stays out of Terraform
+
+- The GCP project. It already exists.
+- The state bucket. The Infra workflow creates `PROJECT_ID-moneybot-tfstate` before apply.
+- Alpaca secret versions. The Infra workflow action `secrets` adds them.
+- Tables. dbt in [`dbt/`](dbt) creates a table only when it is missing.
+- The container image. [`.github/cloudbuild.yaml`](.github/cloudbuild.yaml) builds [`app/Dockerfile`](app/Dockerfile) with the repo root as context, so the image can copy `app/`, `src/`, and `config/`. [`.gcloudignore`](.gcloudignore) stays at the repo root because that is the directory `gcloud` uploads, and it keeps only those paths.

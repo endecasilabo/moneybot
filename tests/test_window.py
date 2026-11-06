@@ -2,7 +2,7 @@ import os
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from moneybot.main import guard_live, in_submit_window, load_config
+from src.jobs import guard_live, in_submit_window, load_config
 
 
 class Clock:
@@ -13,10 +13,12 @@ class Clock:
 
 class WindowTest(unittest.TestCase):
     def test_open_edge_is_inside(self) -> None:
+        # 11 and 20 minutes before the close are inside a 20-minute submit window.
         self.assertTrue(in_submit_window(Clock(11), 20))
         self.assertTrue(in_submit_window(Clock(20), 20))
 
     def test_cutoff_and_early_are_outside(self) -> None:
+        # 10 minutes is too late, 21 minutes and 4 hours are too early.
         self.assertFalse(in_submit_window(Clock(10), 20))
         self.assertFalse(in_submit_window(Clock(21), 20))
         self.assertFalse(in_submit_window(Clock(240), 20))
@@ -24,6 +26,7 @@ class WindowTest(unittest.TestCase):
 
 class ConfigTest(unittest.TestCase):
     def test_repo_config_stays_disarmed(self) -> None:
+        # Checked-in config stays live, trading off, SPY, qty 1, sip feed, 20-minute window.
         previous = os.environ.pop("BOT_CONFIG", None)
         try:
             cfg = load_config()
@@ -38,6 +41,7 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(cfg.submit_before_close_minutes, 20)
 
     def test_paper_url_is_refused(self) -> None:
+        # A paper Alpaca base URL makes guard_live exit instead of trading.
         previous = os.environ.get("APCA_API_BASE_URL")
         os.environ["APCA_API_BASE_URL"] = "https://paper-api.alpaca.markets"
         try:

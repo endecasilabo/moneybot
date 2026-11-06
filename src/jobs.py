@@ -17,8 +17,7 @@ from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, QueryOrderStatus, TimeInForce
 from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest
 
-from moneybot.db import (
-    apply_schema,
+from src.db import (
     connect,
     finish_run,
     insert_account_snapshot,
@@ -29,7 +28,7 @@ from moneybot.db import (
     start_run,
     upsert_order,
 )
-from moneybot.strategy import decide
+from src.strategy import decide
 
 NY = ZoneInfo("America/New_York")
 LIVE_TRADING_URL = "https://api.alpaca.markets"
@@ -64,21 +63,10 @@ class Config:
         self.feed = feed
 
 
-def main() -> None:
-    command = sys.argv[1] if len(sys.argv) == 2 else ""
-    if command == "trade":
-        guarded("trade", trade_window)
-    elif command == "snapshot":
-        guarded("snapshot", take_snapshot)
-    else:
-        raise SystemExit("usage: python -m moneybot trade|snapshot")
-
-
 def guarded(job: str, fn: Any) -> None:
     cfg = load_config()
     guard_live(cfg)
     with connect() as conn:
-        apply_schema(conn, schema_path())
         run_id = start_run(conn, job)
         try:
             status, detail = fn(conn, run_id, cfg)
@@ -407,13 +395,6 @@ def aware(value: datetime) -> datetime:
 
 def config_path() -> Path:
     return Path(os.environ.get("BOT_CONFIG", "config/bot.yaml"))
-
-
-def schema_path() -> Path:
-    raw = os.environ.get("SCHEMA_PATH")
-    if raw:
-        return Path(raw)
-    return Path(__file__).resolve().parent.parent / "schema.sql"
 
 
 def _text(raw: dict[str, Any], key: str) -> str:

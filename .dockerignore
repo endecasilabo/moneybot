@@ -1,8 +1,0 @@
-.venv
-.git
-infra
-tests
-**/__pycache__
-*.tfstate
-*.tfvars
-.env

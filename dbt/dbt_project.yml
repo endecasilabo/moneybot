@@ -1,0 +1,12 @@
+name: moneybot
+version: "1.0.0"
+config-version: 2
+profile: moneybot
+require-dbt-version: [">=1.8.0", "<2.0.0"]
+model-paths: ["models"]
+macro-paths: ["macros"]
+clean-targets: ["target", "dbt_packages", "logs"]
+
+models:
+  moneybot:
+    +materialized: table_if_absent

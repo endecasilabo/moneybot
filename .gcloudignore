@@ -1,8 +1,0 @@
-.venv
-.git
-**/.terraform
-*.tfstate
-*.tfstate.*
-*.tfvars
-**/__pycache__
-.github
