@@ -1,0 +1,34 @@
+# Build bot:latest and update Cloud Run jobs that already exist. Deploy calls this after infra.
+name: Build
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build image and update Cloud Run jobs
+        # Cloud Build pushes bot:latest, then updates any existing jobs to that image.
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          REGION: ${{ vars.GCP_REGION }}
+        run: |
+          region="${REGION:-us-central1}"
+          test -n "$PROJECT_ID" || { echo "PROJECT_ID is required"; exit 1; }
+          gcloud builds submit --project "$PROJECT_ID" --config .github/cloudbuild.yml --substitutions "_REGION=${region}"

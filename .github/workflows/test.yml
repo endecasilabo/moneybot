@@ -1,0 +1,41 @@
+# Unit tests and the GitHub secret check. Deploy calls this on every push and PR.
+name: Test
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check GitHub secrets
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          ALPACA_KEY: ${{ secrets.ALPACA_KEY }}
+          ALPACA_SECRET: ${{ secrets.ALPACA_SECRET }}
+        run: |
+          missing=0
+          for name in GCP_SA_KEY GCP_PROJECT_ID ALPACA_KEY ALPACA_SECRET; do
+            if [ -z "${!name}" ]; then
+              echo "$name is missing"
+              missing=1
+            fi
+          done
+          test "$missing" = 0
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv and Python 3.12
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: "3.12"
+
+      - name: Run unit tests
+        run: |
+          uv venv --python 3.12
+          uv pip install -r app/requirements.txt
+          .venv/bin/python -m unittest discover -s tests
