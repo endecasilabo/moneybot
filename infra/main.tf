@@ -21,22 +21,49 @@ locals {
   # Google-managed identities. Each one appears only after its API has been used once.
   cloudbuild_sa   = "${data.google_project.this.number}@cloudbuild.gserviceaccount.com"
   scheduler_agent = "serviceAccount:service-${data.google_project.this.number}@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
+  # GitHub Actions. Not Owner. The state bucket is created before apply, so this account
+  # already needs roles/storage.admin and roles/resourcemanager.projectIamAdmin once, by hand.
+  deployer_member = "serviceAccount:${var.deployer_account_id}@${var.project_id}.iam.gserviceaccount.com"
+  deployer_roles = toset([
+    "roles/serviceusage.serviceUsageAdmin",
+    "roles/storage.admin",
+    "roles/cloudsql.admin",
+    "roles/artifactregistry.admin",
+    "roles/run.admin",
+    "roles/cloudscheduler.admin",
+    "roles/secretmanager.admin",
+    "roles/cloudbuild.builds.editor",
+    "roles/iam.serviceAccountAdmin",
+    "roles/iam.serviceAccountUser",
+    "roles/resourcemanager.projectIamAdmin",
+  ])
 }
 
 # Leave them on if this config is destroyed. Other things in the project may use them.
+# iam and cloudresourcemanager must be on before any service account or IAM binding.
 
 resource "google_project_service" "apis" {
   for_each = toset([
+    "cloudresourcemanager.googleapis.com",
+    "iam.googleapis.com",
+    "serviceusage.googleapis.com",
     "run.googleapis.com",
     "sqladmin.googleapis.com",
     "cloudscheduler.googleapis.com",
     "secretmanager.googleapis.com",
     "artifactregistry.googleapis.com",
     "cloudbuild.googleapis.com",
-    "iam.googleapis.com",
   ])
   service            = each.value
   disable_on_destroy = false
+}
+
+resource "google_project_iam_member" "deployer" {
+  for_each   = local.deployer_roles
+  project    = var.project_id
+  role       = each.value
+  member     = local.deployer_member
+  depends_on = [google_project_service.apis]
 }
 
 # Cloud Build pushes bot:latest here. The job service account only pulls.
@@ -126,11 +153,13 @@ resource "google_secret_manager_secret" "alpaca_secret" {
 resource "google_service_account" "job" {
   account_id   = "moneybot-job"
   display_name = "moneybot Cloud Run job"
+  depends_on   = [google_project_service.apis]
 }
 
 resource "google_service_account" "scheduler" {
   account_id   = "moneybot-scheduler"
   display_name = "moneybot Cloud Scheduler"
+  depends_on   = [google_project_service.apis]
 }
 
 resource "google_project_iam_member" "job_sql" {

@@ -6,6 +6,12 @@ variable "db_tier" {
   description = "Cloud SQL machine size. This tier stays on; it does not scale to zero."
 }
 
+variable "deployer_account_id" {
+  type        = string
+  default     = "moneybot-sa"
+  description = "Existing GitHub Actions service account. Terraform does not create it."
+}
+
 variable "image" {
   type        = string
   default     = ""

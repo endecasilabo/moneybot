@@ -65,7 +65,7 @@ Models and column tests are in [`dbt/`](dbt).
 
 The GCP project already exists. The default region is `us-central1`. Cloud Scheduler must be available there. Cloud SQL `db-f1-micro` stays on. It does not scale to zero. `deletion_protection` is true.
 
-Create a service account with the Owner role and download the JSON. In the repo, open **Settings → Secrets and variables → Actions** and add:
+Create a service account named `moneybot-sa` and download the JSON. Before the first Deploy, grant that account **Storage Admin** and **Project IAM Admin**. Those two let it create the state bucket and then keep its other roles in Terraform. It does not need Owner. In the repo, open **Settings → Secrets and variables → Actions** and add:
 
 | Name | Kind | Value |
 | --- | --- | --- |
@@ -150,6 +150,7 @@ Scheduler and both jobs run in `America/New_York`. The job reaches Postgres thro
 
 | Account | Used by | Can do |
 | --- | --- | --- |
+| `moneybot-sa` | GitHub Actions | Apply this config and submit Cloud Build. Roles are `google_project_iam_member.deployer` in [`main.tf`](infra/main.tf) |
 | `moneybot-job` | Both Cloud Run jobs | Read SQL, read the three secrets, pull the image |
 | `moneybot-scheduler` | Cloud Scheduler | Call `jobs.run` |
 | Cloud Build service account | `gcloud builds submit` | Push the image, update a job, write logs, act as `moneybot-job` |
