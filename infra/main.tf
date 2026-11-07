@@ -66,13 +66,20 @@ resource "google_project_iam_member" "deployer" {
   depends_on = [google_project_service.apis]
 }
 
+# ponytail: API enablement and a new IAM binding are eventually consistent.
+# 120s covers the usual delay. A later apply does not wait again. Raise this if a retry still says SERVICE_DISABLED.
+resource "time_sleep" "ready" {
+  create_duration = "120s"
+  depends_on      = [google_project_service.apis, google_project_iam_member.deployer]
+}
+
 # Cloud Build pushes bot:latest here. The job service account only pulls.
 
 resource "google_artifact_registry_repository" "bot" {
   location      = var.region
   repository_id = "moneybot"
   format        = "DOCKER"
-  depends_on    = [google_project_service.apis]
+  depends_on    = [time_sleep.ready]
 }
 
 # The job connects through the Cloud SQL volume at /cloudsql, not over the public address.
@@ -98,7 +105,7 @@ resource "google_sql_database_instance" "main" {
     }
   }
 
-  depends_on = [google_project_service.apis]
+  depends_on = [time_sleep.ready]
 }
 
 # Database and user the bot connects as. The password is the random value above.
@@ -119,7 +126,7 @@ resource "google_secret_manager_secret" "db_password" {
   replication {
     auto {}
   }
-  depends_on = [google_project_service.apis]
+  depends_on = [time_sleep.ready]
 }
 
 # Terraform writes this version. Alpaca secrets stay empty until the Infra workflow action secrets.
@@ -136,7 +143,7 @@ resource "google_secret_manager_secret" "alpaca_key" {
   replication {
     auto {}
   }
-  depends_on = [google_project_service.apis]
+  depends_on = [time_sleep.ready]
 }
 
 resource "google_secret_manager_secret" "alpaca_secret" {
@@ -144,7 +151,7 @@ resource "google_secret_manager_secret" "alpaca_secret" {
   replication {
     auto {}
   }
-  depends_on = [google_project_service.apis]
+  depends_on = [time_sleep.ready]
 }
 
 # job: the Cloud Run process. Reads SQL, secrets, and the image.
@@ -153,13 +160,13 @@ resource "google_secret_manager_secret" "alpaca_secret" {
 resource "google_service_account" "job" {
   account_id   = "moneybot-job"
   display_name = "moneybot Cloud Run job"
-  depends_on   = [google_project_service.apis]
+  depends_on   = [time_sleep.ready]
 }
 
 resource "google_service_account" "scheduler" {
   account_id   = "moneybot-scheduler"
   display_name = "moneybot Cloud Scheduler"
-  depends_on   = [google_project_service.apis]
+  depends_on   = [time_sleep.ready]
 }
 
 resource "google_project_iam_member" "job_sql" {
@@ -199,7 +206,7 @@ resource "google_service_account_iam_member" "scheduler_token_creator" {
   service_account_id = google_service_account.scheduler.name
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = local.scheduler_agent
-  depends_on         = [google_project_service.apis]
+  depends_on         = [time_sleep.ready]
 }
 
 # Skipped while var.image is empty. Same image, two jobs: trade and snapshot.
@@ -279,7 +286,7 @@ resource "google_cloud_run_v2_job" "bot" {
   }
 
   depends_on = [
-    google_project_service.apis,
+    time_sleep.ready,
     google_project_iam_member.job_sql,
     google_secret_manager_secret_iam_member.job_db,
     google_secret_manager_secret_iam_member.job_alpaca_key,
@@ -321,7 +328,7 @@ resource "google_cloud_scheduler_job" "bot" {
   }
 
   depends_on = [
-    google_project_service.apis,
+    time_sleep.ready,
     google_cloud_run_v2_job_iam_member.invoker,
     google_service_account_iam_member.scheduler_token_creator,
   ]
@@ -336,14 +343,14 @@ resource "google_artifact_registry_repository_iam_member" "cloudbuild_writer" {
   repository = google_artifact_registry_repository.bot.repository_id
   role       = "roles/artifactregistry.writer"
   member     = "serviceAccount:${local.cloudbuild_sa}"
-  depends_on = [google_project_service.apis]
+  depends_on = [time_sleep.ready]
 }
 
 resource "google_project_iam_member" "cloudbuild_run" {
   project    = var.project_id
   role       = "roles/run.developer"
   member     = "serviceAccount:${local.cloudbuild_sa}"
-  depends_on = [google_project_service.apis]
+  depends_on = [time_sleep.ready]
 }
 
 # Cloud Build writes its own build logs. Without this, the build fails after the push.
@@ -352,12 +359,12 @@ resource "google_project_iam_member" "cloudbuild_logs" {
   project    = var.project_id
   role       = "roles/logging.logWriter"
   member     = "serviceAccount:${local.cloudbuild_sa}"
-  depends_on = [google_project_service.apis]
+  depends_on = [time_sleep.ready]
 }
 
 resource "google_service_account_iam_member" "cloudbuild_runs_as_job" {
   service_account_id = google_service_account.job.name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${local.cloudbuild_sa}"
-  depends_on         = [google_project_service.apis]
+  depends_on         = [time_sleep.ready]
 }
