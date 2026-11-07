@@ -35,3 +35,8 @@
 !dbt/models/*.sql
 !dbt/models/*.yml
 !dbt/macros/*.sql
+
+!requirements-dev.txt
+
+# Base de conocimiento local, nunca se versiona (ver AGENTS.md §5).
+brain/
