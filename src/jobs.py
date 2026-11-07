@@ -63,6 +63,15 @@ class Config:
         self.feed = feed
 
 
+def load_local_env() -> None:
+    # The production image doesn't install python-dotenv and gets its env from Cloud Run; locally it reads .env without overriding exported vars.
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    load_dotenv(override=False)
+
+
 def guarded(job: str, fn: Any) -> None:
     cfg = load_config()
     guard_live(cfg)

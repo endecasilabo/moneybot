@@ -1,0 +1,5 @@
+# Solo para src/backtest.py y src/portfolio.py en local. No se instala en la imagen de Cloud Run
+# (app/Dockerfile usa app/requirements.txt, no este archivo).
+-r app/requirements.txt
+matplotlib>=3.9
+plotly>=5.24

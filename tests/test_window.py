@@ -2,7 +2,9 @@ import os
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from src.jobs import guard_live, in_submit_window, load_config
+from unittest.mock import patch
+
+from src.jobs import guard_live, in_submit_window, load_config, load_local_env
 
 
 class Clock:
@@ -52,6 +54,12 @@ class ConfigTest(unittest.TestCase):
                 os.environ.pop("APCA_API_BASE_URL", None)
             else:
                 os.environ["APCA_API_BASE_URL"] = previous
+
+
+class LocalEnvTest(unittest.TestCase):
+    def test_missing_dotenv_is_a_noop_like_production(self) -> None:
+        with patch.dict("sys.modules", {"dotenv": None}):
+            load_local_env()
 
 
 if __name__ == "__main__":

@@ -35,3 +35,8 @@
 !dbt/models/*.sql
 !dbt/models/*.yml
 !dbt/macros/*.sql
+
+!requirements-dev.txt
+
+!brain/
+!brain/**
