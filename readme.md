@@ -77,13 +77,13 @@ Create a service account with the Owner role and download the JSON. In the repo,
 
 Terraform state lives in the bucket `PROJECT_ID-moneybot-tfstate`. The database password is in that state and in Secret Manager, not in the repo. Alpaca keys live in GitHub Secrets and in Secret Manager.
 
-From **Actions → Run workflow**, in this order:
+A push to `main` runs **Deploy**. That workflow calls [test.yml](.github/workflows/test.yml), then [infra.yml](.github/workflows/infra.yml) with action `infra`, then [build.yml](.github/workflows/build.yml). The apply creates Artifact Registry, Cloud SQL, Cloud Build IAM, and the empty secrets. It does not create the jobs. If that apply fails because the Cloud Build account or the Scheduler agent does not exist yet, run **Deploy** again.
 
-1. Workflow **infra**, action `infra`. Creates Artifact Registry, Cloud SQL, Cloud Build IAM, and the empty secrets. It does not create the jobs. If it fails because the Cloud Build account or the Scheduler agent does not exist yet, run `infra` again.
-2. Workflow **infra**, action `schema`. dbt creates the tables.
-3. Workflow **infra**, action `secrets`. Loads the Alpaca keys into Secret Manager.
-4. A push to `main` runs **deploy**: tests, then Cloud Build. Cloud Build publishes `bot:latest` and updates a job when that job already exists.
-5. Workflow **infra**, action `jobs`. Creates `moneybot-trade`, `moneybot-snapshot`, and the two schedulers on that image.
+Then, from **Actions → Infra**, in this order:
+
+1. Action `schema`. dbt creates the tables.
+2. Action `secrets`. Loads the Alpaca keys into Secret Manager.
+3. Action `jobs`. Creates `moneybot-trade`, `moneybot-snapshot`, and the two schedulers on `bot:latest`.
 
 Every push and every pull request runs the tests. Every push to `main` publishes the image again. Changing [`config/bot.yml`](config/bot.yml), including `trading_enabled: true`, is a push to `main`.
 
