@@ -1,7 +1,13 @@
-# Manual one-off infrastructure and secret operations. Pick one action per run.
+# Infrastructure and secret operations. Deploy calls action infra before the image build.
 name: Infra
 
 on:
+  workflow_call:
+    inputs:
+      action:
+        description: infra, schema, secrets, or jobs.
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       action:
