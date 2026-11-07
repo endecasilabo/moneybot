@@ -5,24 +5,30 @@
 !.gcloudignore
 !readme.md
 
+!.github/
 !.github/cloudbuild.yml
 !.github/workflows/
 !.github/workflows/*.yml
 
+!config/
 !config/*.yml
 
+!app/
 !app/Dockerfile
 !app/.dockerignore
 !app/entrypoint.py
 !app/requirements.txt
 
+!src/
 !src/*.py
 
+!tests/
 !tests/*.py
 
+!infra/
 !infra/*.tf
 
-
+!dbt/
 !dbt/dbt_project.yml
 !dbt/profiles.yml
 !dbt/requirements.txt
