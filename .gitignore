@@ -32,8 +32,10 @@
 !dbt/dbt_project.yml
 !dbt/profiles.yml
 !dbt/requirements.txt
+!dbt/models/
 !dbt/models/*.sql
 !dbt/models/*.yml
+!dbt/macros/
 !dbt/macros/*.sql
 
 !requirements-dev.txt

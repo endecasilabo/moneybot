@@ -4,6 +4,12 @@ Estado: aceptada (2026-11-07). Pendiente de implementar.
 Rama: `feat/three-jobs`
 PR: —
 
+> **Actualización 2026-11-11**: la persistencia pasa de Cloud SQL a BigQuery
+> ([2026-11-11-bigquery](2026-11-11-bigquery.md)). Las tablas `bars` y `order_intents` ya existen
+> allí, y `order_intents` es de **eventos** (cada cambio de estado es una fila nueva; el estado
+> actual sale de `order_intents_latest`), no una fila que se actualiza. Donde abajo dice "Cloud SQL"
+> o "marca el estado", léase "BigQuery" y "añade un evento".
+
 ## Problema
 
 Hoy `trade_window` (`src/jobs.py`) hace todo en un solo job a ~15:45 NY: pide los datos a Alpaca,
