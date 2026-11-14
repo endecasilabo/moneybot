@@ -1,10 +1,10 @@
 create table if not exists {{ this }} (
-    id bigserial primary key,
-    run_id bigint not null references {{ ref('runs') }} (id),
-    ts timestamptz not null default now(),
+    run_id string not null,
+    ts timestamp not null,
     equity numeric,
     cash numeric,
     buying_power numeric,
     portfolio_value numeric,
-    open_orders jsonb not null
+    open_orders json not null
 )
+partition by date(ts)

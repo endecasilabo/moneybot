@@ -1,13 +1,18 @@
 moneybot:
-  target: cloudsql
+  target: dev
   outputs:
-    cloudsql:
-      type: postgres
-      host: 127.0.0.1
-      port: 5432
-      user: moneybot
-      password: "{{ env_var('DB_PASSWORD') }}"
-      dbname: moneybot
-      schema: public
+    # Local: gcloud auth application-default login. CI: the GitHub Actions service account.
+    dev:
+      type: bigquery
+      method: oauth
+      project: "{{ env_var('GCP_PROJECT_ID') }}"
+      dataset: moneybot_dev
+      location: US
       threads: 1
-      sslmode: disable
+    prod:
+      type: bigquery
+      method: oauth
+      project: "{{ env_var('GCP_PROJECT_ID') }}"
+      dataset: moneybot
+      location: US
+      threads: 1

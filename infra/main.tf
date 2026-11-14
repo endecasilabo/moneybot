@@ -28,6 +28,7 @@ locals {
     "roles/serviceusage.serviceUsageAdmin",
     "roles/storage.admin",
     "roles/cloudsql.admin",
+    "roles/bigquery.admin",
     "roles/artifactregistry.admin",
     "roles/run.admin",
     "roles/cloudscheduler.admin",
@@ -49,6 +50,7 @@ resource "google_project_service" "apis" {
     "serviceusage.googleapis.com",
     "run.googleapis.com",
     "sqladmin.googleapis.com",
+    "bigquery.googleapis.com",
     "cloudscheduler.googleapis.com",
     "secretmanager.googleapis.com",
     "artifactregistry.googleapis.com",
@@ -169,6 +171,24 @@ resource "google_service_account" "scheduler" {
   depends_on   = [time_sleep.ready]
 }
 
+# Append-only tables, created by dbt (Infra workflow, action schema). See brain/architecture/0003-bigquery.md.
+resource "google_bigquery_dataset" "bot" {
+  dataset_id                 = "moneybot"
+  location                   = "US"
+  delete_contents_on_destroy = false
+  depends_on                 = [time_sleep.ready]
+}
+
+# bigquery.user includes jobs.create, which the job needs for its queries.
+resource "google_project_iam_member" "job_bq" {
+  for_each = toset(["roles/bigquery.dataEditor", "roles/bigquery.user"])
+  project  = var.project_id
+  role     = each.value
+  member   = "serviceAccount:${google_service_account.job.email}"
+}
+
+# ponytail: Cloud SQL stays until BigQuery is verified in production. The jobs no longer use it.
+# Upgrade path: a follow-up PR removes the instance, database, user, password secret, this role and the API.
 resource "google_project_iam_member" "job_sql" {
   project = var.project_id
   role    = "roles/cloudsql.client"
@@ -231,25 +251,8 @@ resource "google_cloud_run_v2_job" "bot" {
           value = "/app/config/bot.yml"
         }
         env {
-          name  = "INSTANCE_CONNECTION_NAME"
-          value = google_sql_database_instance.main.connection_name
-        }
-        env {
-          name  = "DB_NAME"
-          value = google_sql_database.bot.name
-        }
-        env {
-          name  = "DB_USER"
-          value = google_sql_user.bot.name
-        }
-        env {
-          name = "DB_PASSWORD"
-          value_source {
-            secret_key_ref {
-              secret  = google_secret_manager_secret.db_password.secret_id
-              version = "latest"
-            }
-          }
+          name  = "BQ_DATASET"
+          value = "${var.project_id}.${google_bigquery_dataset.bot.dataset_id}"
         }
         env {
           name = "ALPACA_KEY"
@@ -269,30 +272,16 @@ resource "google_cloud_run_v2_job" "bot" {
             }
           }
         }
-
-        volume_mounts {
-          name       = "cloudsql"
-          mount_path = "/cloudsql"
-        }
-      }
-
-      volumes {
-        name = "cloudsql"
-        cloud_sql_instance {
-          instances = [google_sql_database_instance.main.connection_name]
-        }
       }
     }
   }
 
   depends_on = [
     time_sleep.ready,
-    google_project_iam_member.job_sql,
-    google_secret_manager_secret_iam_member.job_db,
+    google_project_iam_member.job_bq,
     google_secret_manager_secret_iam_member.job_alpaca_key,
     google_secret_manager_secret_iam_member.job_alpaca_secret,
     google_artifact_registry_repository_iam_member.job_reader,
-    google_secret_manager_secret_version.db_password,
   ]
 }
 

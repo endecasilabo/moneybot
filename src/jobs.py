@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import psycopg
 import yaml
 from alpaca.common.exceptions import APIError
 from alpaca.data.enums import Adjustment, DataFeed
@@ -16,6 +15,7 @@ from alpaca.data.timeframe import TimeFrame
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, QueryOrderStatus, TimeInForce
 from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest
+from google.cloud import bigquery
 
 from src.db import (
     connect,
@@ -23,10 +23,10 @@ from src.db import (
     insert_account_snapshot,
     insert_position_snapshot,
     insert_signal,
+    record_order,
     require_env,
     sent_order,
     start_run,
-    upsert_order,
 )
 from src.strategy import decide
 
@@ -80,14 +80,14 @@ def guarded(job: str, fn: Any) -> None:
         try:
             status, detail = fn(conn, run_id, cfg)
         except Exception as exc:
-            finish_run(conn, run_id, "error", str(exc))
+            finish_run(conn, run_id, job, "error", str(exc))
             print(f"{job} status=error detail={exc}", file=sys.stderr)
             raise SystemExit(1) from exc
-        finish_run(conn, run_id, status, detail)
+        finish_run(conn, run_id, job, status, detail)
         print(f"{job} status={status} detail={detail or ''}")
 
 
-def trade_window(conn: psycopg.Connection, run_id: int, cfg: Config) -> tuple[str, str]:
+def trade_window(conn: bigquery.Client, run_id: str, cfg: Config) -> tuple[str, str]:
     trading, data = alpaca_clients()
     clock = trading.get_clock()
     if not in_submit_window(clock, cfg.submit_before_close_minutes):
@@ -119,14 +119,20 @@ def trade_window(conn: psycopg.Connection, run_id: int, cfg: Config) -> tuple[st
     )
     if qty < 0:
         insert_signal(
-            conn, run_id, cfg.symbol, session, price, decision, True, "hold", "short_position"
+            conn, run_id, cfg.symbol, session, price, decision, True, "hold", "short_position",
+            params=strategy_params(cfg),
         )
         raise RuntimeError("short_position")
     if in_position and qty != qty.to_integral_value():
-        insert_signal(conn, run_id, cfg.symbol, session, price, decision, True)
+        insert_signal(
+            conn, run_id, cfg.symbol, session, price, decision, True, params=strategy_params(cfg)
+        )
         raise RuntimeError("fractional_position")
 
-    insert_signal(conn, run_id, cfg.symbol, session, price, decision, in_position)
+    insert_signal(
+        conn, run_id, cfg.symbol, session, price, decision, in_position,
+        params=strategy_params(cfg),
+    )
     print(f"signal {cfg.symbol} {decision.action} {decision.reason} last={price} qty={qty}")
 
     if decision.action == "hold":
@@ -165,7 +171,7 @@ def trade_window(conn: psycopg.Connection, run_id: int, cfg: Config) -> tuple[st
         order = trading.submit_order(order_data=request)
     except APIError as exc:
         if duplicate_order(exc):
-            upsert_order(
+            record_order(
                 conn,
                 client_order_id,
                 run_id,
@@ -178,7 +184,7 @@ def trade_window(conn: psycopg.Connection, run_id: int, cfg: Config) -> tuple[st
                 str(exc),
             )
             return "skipped", "already_submitted"
-        upsert_order(
+        record_order(
             conn,
             client_order_id,
             run_id,
@@ -193,7 +199,7 @@ def trade_window(conn: psycopg.Connection, run_id: int, cfg: Config) -> tuple[st
         raise
 
     filled = None if order.filled_avg_price is None else Decimal(str(order.filled_avg_price))
-    upsert_order(
+    record_order(
         conn,
         client_order_id,
         run_id,
@@ -208,7 +214,7 @@ def trade_window(conn: psycopg.Connection, run_id: int, cfg: Config) -> tuple[st
     return "ok", f"submitted:{side_name}:{client_order_id}"
 
 
-def take_snapshot(conn: psycopg.Connection, run_id: int, cfg: Config) -> tuple[str, str]:
+def take_snapshot(conn: bigquery.Client, run_id: str, cfg: Config) -> tuple[str, str]:
     del cfg
     trading, _data = alpaca_clients()
     account = trading.get_account()
@@ -235,6 +241,14 @@ def take_snapshot(conn: psycopg.Connection, run_id: int, cfg: Config) -> tuple[s
             decimal_or_none(position.current_price),
         )
     return "ok", f"positions={len(positions)}"
+
+
+def strategy_params(cfg: Config) -> dict[str, int]:
+    return {
+        "trend_window": cfg.trend_window,
+        "exit_window": cfg.exit_window,
+        "down_days": cfg.down_days,
+    }
 
 
 def load_config() -> Config:

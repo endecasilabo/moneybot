@@ -1,76 +1,60 @@
 version: 2
 
+# Tables are append-only events; uniqueness is tested on the *_latest views, not the event tables.
 models:
   - name: runs
-    description: One row per bot execution.
+    description: Run events. One row when a run starts (running) and one when it ends.
+  - name: runs_latest
+    description: Current state of each run.
     columns:
-      - name: id
+      - name: run_id
         data_tests: [unique, not_null]
-      - name: job
-        description: trade or snapshot.
-        data_tests: [not_null]
       - name: status
         description: running, ok, skipped, or error.
-        data_tests: [not_null]
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [running, ok, skipped, error]
 
   - name: signals
-    description: The decision recorded for one trade run.
+    description: What decide() saw and chose, with the strategy parameters that produced it.
     columns:
-      - name: id
+      - name: signal_id
         data_tests: [unique, not_null]
       - name: run_id
         data_tests:
-          - not_null
           - relationships:
               arguments:
-                to: ref('runs')
-                field: id
-      - name: symbol
-        data_tests: [not_null]
+                to: ref('runs_latest')
+                field: run_id
       - name: action
         description: buy, sell, or hold.
-        data_tests: [not_null]
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [buy, sell, hold]
 
   - name: orders
-    description: A market-on-close order sent to Alpaca, keyed so a rerun cannot send it twice.
+    description: Order events sent to Alpaca. client_order_id repeats across events of one order.
+  - name: orders_latest
+    description: Current state of each order.
     columns:
       - name: client_order_id
         data_tests: [unique, not_null]
-      - name: run_id
-        data_tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('runs')
-                field: id
+
+  - name: order_intents
+    description: Intent events written by trigger and execute (next branch).
+  - name: order_intents_latest
+    description: Current state of each intent.
+    columns:
+      - name: client_order_id
+        data_tests: [unique, not_null]
 
   - name: account_snapshots
-    description: Account balances and open orders at one snapshot run.
-    columns:
-      - name: id
-        data_tests: [unique, not_null]
-      - name: run_id
-        data_tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('runs')
-                field: id
-      - name: open_orders
-        description: Open Alpaca orders stored as JSON.
-        data_tests: [not_null]
-
+    description: Account balances and open orders (JSON) at one snapshot run.
   - name: position_snapshots
     description: One open position at one snapshot run.
-    columns:
-      - name: id
-        data_tests: [unique, not_null]
-      - name: run_id
-        data_tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('runs')
-                field: id
-      - name: symbol
-        data_tests: [not_null]
+  - name: bars
+    description: OHLCV bars by symbol, timeframe (1Hour, 1Day) and bar start ts (UTC).
+  - name: assets
+    description: Instrument dimension keyed by symbol.

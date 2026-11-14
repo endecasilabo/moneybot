@@ -28,7 +28,7 @@ python app/entrypoint.py trade|snapshot
 guarded(job, fn)
   -> load_config()        # config/bot.yml, valida mode=live, feed=sip, etc.
   -> guard_live(cfg)       # aborta si mode != live o si la URL de Alpaca es paper
-  -> connect()             # las tablas las crea dbt/, no el bot
+  -> connect()             # cliente BigQuery; las tablas las crea dbt/, no el bot
   -> start_run() -> fn(conn, run_id, cfg) -> finish_run()
 ```
 
@@ -44,10 +44,17 @@ Layout tras la reestructura de `dev`: ver `brain/architecture/0002-reestructura-
 - **`take_snapshot`**: lee cuenta, posiciones y órdenes abiertas de Alpaca y las guarda. No decide,
   no opera.
 
-## Los datos (Postgres, modelos en `dbt/models/`)
+## Los datos (BigQuery, dataset `moneybot`, modelos en `dbt/models/`)
 
-`runs` (cada ejecución) → `signals` (qué vio y qué decidió) → `orders` (qué mandó). Separado,
-`account_snapshots` y `position_snapshots` para el job de snapshot.
+`runs` (cada ejecución) → `signals` (qué vio y qué decidió, con los parámetros de la estrategia) →
+`orders` (qué mandó). Separado, `account_snapshots` y `position_snapshots` para el job de snapshot.
+Ya creadas para lo que viene: `bars`, `assets` y `order_intents`.
+
+**Todo es solo añadir**: un cambio de estado es una fila nueva, nunca un `UPDATE`. El estado actual
+sale de las vistas `runs_latest`, `orders_latest` y `order_intents_latest`. Los ids son UUID. El job
+se identifica con su cuenta de servicio y lee el dataset de `BQ_DATASET` (`<proyecto>.<dataset>`).
+Detalle y motivos en `brain/architecture/0003-bigquery.md`. Para pruebas locales:
+`BQ_DATASET=moneybot-514003.moneybot_dev` y `dbt build` (target `dev` por defecto).
 
 ## Lo que se pide a Alpaca
 

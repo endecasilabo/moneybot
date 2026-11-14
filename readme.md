@@ -49,21 +49,26 @@ The picture of GCP, and which file owns which resource, is in [Infrastructure](#
 
 ## Data
 
-Cloud SQL Postgres. dbt creates the tables with `dbt build`. If a table already exists, dbt leaves it alone. A later column change is not applied to an existing table.
+BigQuery, dataset `moneybot` (location `US`). dbt creates the tables and views with `dbt build`. If a table already exists, dbt leaves it alone. A later column change is not applied to an existing table.
+
+Every table is append-only: a change of state is a new row, never an `UPDATE`. The views `runs_latest`, `orders_latest`, and `order_intents_latest` give the current state. Ids are UUIDs. Why: [`brain/architecture/0003-bigquery.md`](brain/architecture/0003-bigquery.md).
 
 | Table | One row is |
 | --- | --- |
-| `runs` | One execution of either job |
-| `signals` | The price, both 200-day SMAs, the 5-day SMA, the flags, the action, and the reason |
-| `orders` | A `cls` order sent to Alpaca |
+| `runs` | One event of a run: `running` when it starts, then `ok`, `skipped`, or `error` |
+| `signals` | The price, both 200-day SMAs, the 5-day SMA, the flags, the action, the reason, and the strategy parameters (JSON) |
+| `orders` | One event of a `cls` order sent to Alpaca |
 | `account_snapshots` | Equity, cash, buying power, and open orders |
 | `position_snapshots` | One open position |
+| `bars` | One OHLCV bar per symbol, timeframe, and start time. Filled by the ingest job (next change) |
+| `assets` | One instrument |
+| `order_intents` | One event of an order intent. Used by the trigger and execute jobs (next change) |
 
 Models and column tests are in [`dbt/`](dbt).
 
 ## Deploy
 
-The GCP project already exists. The default region is `us-central1`. Cloud Scheduler must be available there. Cloud SQL `db-f1-micro` stays on. It does not scale to zero. `deletion_protection` is true.
+The GCP project already exists. The default region is `us-central1`. Cloud Scheduler must be available there. Cloud SQL `db-f1-micro` still exists but the jobs no longer use it. It is removed in a later change.
 
 Create a service account named `moneybot-sa` and download the JSON. Before the first Deploy, grant that account **Storage Admin** and **Project IAM Admin**. Those two let it create the state bucket and then keep its other roles in Terraform. It does not need Owner. In the repo, open **Settings → Secrets and variables → Actions** and add:
 
@@ -75,9 +80,9 @@ Create a service account named `moneybot-sa` and download the JSON. Before the f
 | `ALPACA_SECRET` | secret | Alpaca secret |
 | `GCP_REGION` | variable | Optional. Workflows use `us-central1` when it is empty |
 
-Terraform state lives in the bucket `PROJECT_ID-moneybot-tfstate`. The database password is in that state and in Secret Manager, not in the repo. Alpaca keys live in GitHub Secrets and in Secret Manager.
+Terraform state lives in the bucket `PROJECT_ID-moneybot-tfstate`. Alpaca keys live in GitHub Secrets and in Secret Manager.
 
-A push to `main` runs **Deploy**. That workflow calls [test.yml](.github/workflows/test.yml), then [infra.yml](.github/workflows/infra.yml) with action `infra`, then [build.yml](.github/workflows/build.yml). The apply creates Artifact Registry, Cloud SQL, Cloud Build IAM, and the empty secrets. It does not create the jobs. If that apply fails because the Cloud Build account or the Scheduler agent does not exist yet, run **Deploy** again.
+A push to `main` runs **Deploy**. That workflow calls [test.yml](.github/workflows/test.yml), then [infra.yml](.github/workflows/infra.yml) with action `infra`, then [build.yml](.github/workflows/build.yml). The apply creates Artifact Registry, the BigQuery dataset, Cloud SQL (unused), Cloud Build IAM, and the empty secrets. It does not create the jobs. If that apply fails because the Cloud Build account or the Scheduler agent does not exist yet, run **Deploy** again.
 
 Then, from **Actions → Infra**, in this order:
 
@@ -100,13 +105,13 @@ GCP layout for moneybot. Terraform in `infra/` creates it.
 | [`providers.tf`](infra/providers.tf) | Google provider, project, and region |
 | [`variables.tf`](infra/variables.tf) | Inputs. An empty `image` skips the jobs |
 | [`main.tf`](infra/main.tf) | Every resource |
-| [`outputs.tf`](infra/outputs.tf) | Image repository and Cloud SQL connection name |
+| [`outputs.tf`](infra/outputs.tf) | Image repository and BigQuery dataset |
 
 Two applies share this config:
 
 | Apply | `image` | What appears |
 | --- | --- | --- |
-| `infra` | empty | APIs, registry, Cloud SQL, secret shells, IAM |
+| `infra` | empty | APIs, registry, BigQuery dataset, Cloud SQL (unused), secret shells, IAM |
 | `jobs` | `bot:latest` | The same, plus both Cloud Run jobs and both schedulers |
 
 Alpaca key values are not in Terraform. The Infra workflow action `secrets` writes those Secret Manager versions. dbt creates the tables. See [Deploy](#deploy).
@@ -122,7 +127,7 @@ flowchart LR
   snapshot["moneybot-snapshot"]
   scheduler[Cloud Scheduler]
   secrets[Secret Manager]
-  sql[Cloud SQL]
+  bq[BigQuery]
   dbtNode[dbt]
   alpaca[Alpaca]
 
@@ -136,22 +141,22 @@ flowchart LR
   scheduler -->|"POST jobs.run"| snapshot
   secrets --> trade
   secrets --> snapshot
-  trade --> sql
-  snapshot --> sql
+  trade --> bq
+  snapshot --> bq
   trade --> alpaca
   snapshot --> alpaca
   actions -->|"schema"| dbtNode
-  dbtNode -->|"create missing tables"| sql
+  dbtNode -->|"create missing tables"| bq
 ```
 
-Scheduler and both jobs run in `America/New_York`. The job reaches Postgres through the Cloud SQL socket at `/cloudsql`, not through the instance's public address. The public IP exists so the `schema` action can open the Cloud SQL Auth Proxy from GitHub Actions.
+Scheduler and both jobs run in `America/New_York`. The jobs reach BigQuery with their own service account. There is no database password or socket.
 
 ### Identities
 
 | Account | Used by | Can do |
 | --- | --- | --- |
 | `moneybot-sa` | GitHub Actions | Apply this config and submit Cloud Build. Roles are `google_project_iam_member.deployer` in [`main.tf`](infra/main.tf) |
-| `moneybot-job` | Both Cloud Run jobs | Read SQL, read the three secrets, pull the image |
+| `moneybot-job` | Both Cloud Run jobs | Write and query BigQuery, read the Alpaca secrets, pull the image |
 | `moneybot-scheduler` | Cloud Scheduler | Call `jobs.run` |
 | Cloud Build service account | `gcloud builds submit` | Push the image, update a job, write logs, act as `moneybot-job` |
 | Scheduler service agent | Google-managed | Mint the OAuth token for `moneybot-scheduler` |
