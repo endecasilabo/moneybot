@@ -9,4 +9,4 @@ clean-targets: ["target", "dbt_packages", "logs"]
 
 models:
   moneybot:
-    +materialized: table_if_absent
+    +materialized: view

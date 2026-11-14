@@ -7,7 +7,8 @@ The 491% from 2023 is the futures World Cup. Those models are not published. Thi
 ## Contents
 
 - [Rules](#rules)
-- [Two jobs](#two-jobs)
+- [Services](#services)
+- [Three jobs](#three-jobs)
 - [Data](#data)
 - [Deploy](#deploy)
 - [Infrastructure](#infrastructure)
@@ -34,14 +35,35 @@ Also:
 
 `mode` other than `live`, or `APCA_API_BASE_URL` containing `paper`, aborts the process.
 
-## Two jobs
+## Services
 
-One image. Two Cloud Run jobs. Two Cloud Scheduler triggers in `America/New_York`.
+There is no single app. Each runnable is a directory under `services/`, with its own entrypoint, requirements, `src` package, and `.dockerignore`. Shared `config/` and `dbt/` stay at the repo root.
+
+| Service | Path | What it runs |
+| --- | --- | --- |
+| `collector` | [`services/collector`](services/collector) | The current bot: `trade`, `snapshot`, and `bars` |
+
+`services/collector/src` is the Python package. Imports stay `src.*`. Tests live in `services/collector/tests`. From the repo root:
+
+```bash
+PYTHONPATH=services/collector python -m unittest discover -s services/collector/tests
+```
+
+The image build context is the service directory. Its `.dockerignore` allows only `entrypoint.py`, `requirements.txt`, `src/*.py`, and `src/collector/*.py`. Tests stay out of the image.
+
+```bash
+docker build -f services/collector/Dockerfile services/collector
+```
+
+## Three jobs
+
+The collector ships one image. Three Cloud Run jobs. Three Cloud Scheduler triggers in `America/New_York`.
 
 | Job | Default cron | What it does |
 | --- | --- | --- |
 | `moneybot-trade` | `*/5 12-16 * * 1-5` | Sends the order only when the close is more than 10 and at most 20 minutes away. That covers the 16:00 ET close and the 13:00 ET early close. Outside that window it does not touch orders |
 | `moneybot-snapshot` | `*/15 9-16 * * 1-5` | Reads the account, positions, and open orders. It does not decide and it does not trade |
+| `moneybot-bars` | `35 10-16 * * 1-5` | Stores split-adjusted 1-hour SIP bars for the configured symbol. It does not decide and it does not trade. The first run starts at 2016-01-01. Later runs start after the last stored bar, so a missed run fills the gap |
 
 The crons are Terraform variables. If the trade job does not run inside the window, that session is not traded.
 
@@ -49,26 +71,31 @@ The picture of GCP, and which file owns which resource, is in [Infrastructure](#
 
 ## Data
 
-BigQuery, dataset `moneybot` (location `US`). dbt creates the tables and views with `dbt build`. If a table already exists, dbt leaves it alone. A later column change is not applied to an existing table.
-
-Every table is append-only: a change of state is a new row, never an `UPDATE`. The views `runs_latest`, `orders_latest`, and `order_intents_latest` give the current state. Ids are UUIDs. Why: [`brain/architecture/0003-bigquery.md`](brain/architecture/0003-bigquery.md).
+BigQuery dataset `moneybot` in the same region as the jobs. Terraform creates the tables. `deletion_protection` is true on each table, so a column change that would recreate the table stops until that flag is turned off. A dbt model must not reuse these table ids.
 
 | Table | One row is |
 | --- | --- |
-| `runs` | One event of a run: `running` when it starts, then `ok`, `skipped`, or `error` |
-| `signals` | The price, both 200-day SMAs, the 5-day SMA, the flags, the action, the reason, and the strategy parameters (JSON) |
-| `orders` | One event of a `cls` order sent to Alpaca |
+| `runs` | One execution of any job. `id` is a random id |
+| `signals` | The price, both 200-day SMAs, the 5-day SMA, the flags, the action, and the reason |
+| `orders` | A `cls` order sent to Alpaca. `client_order_id` is the key the job merges on |
 | `account_snapshots` | Equity, cash, buying power, and open orders |
 | `position_snapshots` | One open position |
-| `bars` | One OHLCV bar per symbol, timeframe, and start time. Filled by the ingest job (next change) |
-| `assets` | One instrument |
-| `order_intents` | One event of an order intent. Used by the trigger and execute jobs (next change) |
-
-Models and column tests are in [`dbt/`](dbt).
+| `base_bar` | One split-adjusted bar. The collector reads the column list from [`dbt/models/base/base_bar.yml`](dbt/models/base/base_bar.yml). The lookup key is symbol, feed, timeframe, and the bar open time |
 
 ## Deploy
 
-The GCP project already exists. The default region is `us-central1`. Cloud Scheduler must be available there. Cloud SQL `db-f1-micro` still exists but the jobs no longer use it. It is removed in a later change.
+The GCP project already exists. The default region is `us-central1`. Cloud Scheduler must be available there. BigQuery uses that same region. There is no database server to keep running.
+
+**Warning:** If this project already has the Cloud SQL instance `moneybot`, the next `infra` apply tries to delete it. The rows in that instance are not copied into BigQuery. Deletion protection blocks the destroy. Turn the API flag off, drop the Cloud SQL resources from state, delete the instance, then apply again:
+
+```bash
+gcloud sql instances patch moneybot --project "$PROJECT_ID" --no-deletion-protection --quiet
+terraform -chdir=infra state rm \
+  google_sql_database_instance.main \
+  google_sql_database.bot \
+  google_sql_user.bot
+gcloud sql instances delete moneybot --project "$PROJECT_ID" --quiet
+```
 
 Create a service account named `moneybot-sa` and download the JSON. Before the first Deploy, grant that account **Storage Admin** and **Project IAM Admin**. Those two let it create the state bucket and then keep its other roles in Terraform. It does not need Owner. In the repo, open **Settings → Secrets and variables → Actions** and add:
 
@@ -80,15 +107,16 @@ Create a service account named `moneybot-sa` and download the JSON. Before the f
 | `ALPACA_SECRET` | secret | Alpaca secret |
 | `GCP_REGION` | variable | Optional. Workflows use `us-central1` when it is empty |
 
-Terraform state lives in the bucket `PROJECT_ID-moneybot-tfstate`. Alpaca keys live in GitHub Secrets and in Secret Manager.
+Terraform state lives in the bucket `PROJECT_ID-moneybot-tfstate`. Alpaca keys live in GitHub Secrets and in Secret Manager. There is no database password.
 
-A push to `main` runs **Deploy**. That workflow calls [test.yml](.github/workflows/test.yml), then [infra.yml](.github/workflows/infra.yml) with action `infra`, then [build.yml](.github/workflows/build.yml). The apply creates Artifact Registry, the BigQuery dataset, Cloud SQL (unused), Cloud Build IAM, and the empty secrets. It does not create the jobs. If that apply fails because the Cloud Build account or the Scheduler agent does not exist yet, run **Deploy** again.
+A push to `main` runs **Deploy**. That workflow calls [test.yml](.github/workflows/test.yml), then [infra.yml](.github/workflows/infra.yml) with action `infra`, then [build.yml](.github/workflows/build.yml). Build calls [build-service-image.yml](.github/workflows/build-service-image.yml), which has no manual trigger. For `collector` it hashes `Dockerfile` and `requirements.txt`. If `collector-bedrock:<sha>` is missing, Cloud Build runs `--target bedrock`. Then it hashes the allowlisted context. If `collector:<sha>` is missing, Cloud Build runs with `BEDROCK_IMAGE` set to that bedrock URI, so a code change does not reinstall dependencies. The apply creates Artifact Registry, the BigQuery dataset and tables, Cloud Build IAM, and the empty Alpaca secrets. It does not create the jobs. If that apply fails because the Cloud Build account or the Scheduler agent does not exist yet, run **Deploy** again.
 
 Then, from **Actions → Infra**, in this order:
 
-1. Action `schema`. dbt creates the tables.
-2. Action `secrets`. Loads the Alpaca keys into Secret Manager.
-3. Action `jobs`. Creates `moneybot-trade`, `moneybot-snapshot`, and the two schedulers on `bot:latest`.
+1. Action `secrets`. Loads the Alpaca keys into Secret Manager.
+2. Action `jobs`. Creates `moneybot-trade`, `moneybot-snapshot`, `moneybot-bars`, and the three schedulers on `collector:latest`.
+
+Action `schema` runs dbt against BigQuery. The collector tables already exist after `infra`. A dbt model must not use the table ids `runs`, `signals`, `orders`, `account_snapshots`, `position_snapshots`, or `base_bar`.
 
 Every push and every pull request runs the tests. Every push to `main` publishes the image again. Changing [`config/bot.yml`](config/bot.yml), including `trading_enabled: true`, is a push to `main`.
 
@@ -105,16 +133,16 @@ GCP layout for moneybot. Terraform in `infra/` creates it.
 | [`providers.tf`](infra/providers.tf) | Google provider, project, and region |
 | [`variables.tf`](infra/variables.tf) | Inputs. An empty `image` skips the jobs |
 | [`main.tf`](infra/main.tf) | Every resource |
-| [`outputs.tf`](infra/outputs.tf) | Image repository and BigQuery dataset |
+| [`outputs.tf`](infra/outputs.tf) | Image repository and BigQuery dataset id |
 
 Two applies share this config:
 
 | Apply | `image` | What appears |
 | --- | --- | --- |
-| `infra` | empty | APIs, registry, BigQuery dataset, Cloud SQL (unused), secret shells, IAM |
-| `jobs` | `bot:latest` | The same, plus both Cloud Run jobs and both schedulers |
+| `infra` | empty | APIs, registry, BigQuery dataset and tables, secret shells, IAM |
+| `jobs` | `collector:latest` | The same, plus the Cloud Run jobs and their schedulers |
 
-Alpaca key values are not in Terraform. The Infra workflow action `secrets` writes those Secret Manager versions. dbt creates the tables. See [Deploy](#deploy).
+Alpaca key values are not in Terraform. The Infra workflow action `secrets` writes those Secret Manager versions. Terraform creates the tables the jobs write. See [Deploy](#deploy).
 
 ### Architecture
 
@@ -125,6 +153,7 @@ flowchart LR
   registry[Artifact Registry]
   trade["moneybot-trade"]
   snapshot["moneybot-snapshot"]
+  bars["moneybot-bars"]
   scheduler[Cloud Scheduler]
   secrets[Secret Manager]
   bq[BigQuery]
@@ -132,31 +161,37 @@ flowchart LR
   alpaca[Alpaca]
 
   actions -->|"deploy"| build
-  build -->|"push bot:latest"| registry
+  build -->|"push collector:latest"| registry
   registry --> trade
   registry --> snapshot
+  registry --> bars
   build -->|"update job if it exists"| trade
   build -->|"update job if it exists"| snapshot
+  build -->|"update job if it exists"| bars
   scheduler -->|"POST jobs.run"| trade
   scheduler -->|"POST jobs.run"| snapshot
+  scheduler -->|"POST jobs.run"| bars
   secrets --> trade
   secrets --> snapshot
+  secrets --> bars
   trade --> bq
   snapshot --> bq
+  bars --> bq
   trade --> alpaca
   snapshot --> alpaca
+  bars --> alpaca
   actions -->|"schema"| dbtNode
-  dbtNode -->|"create missing tables"| bq
+  dbtNode -->|"views"| bq
 ```
 
-Scheduler and both jobs run in `America/New_York`. The jobs reach BigQuery with their own service account. There is no database password or socket.
+Scheduler and the jobs run in `America/New_York`. The job uses its own service account to query BigQuery. There is no database socket and no database password.
 
 ### Identities
 
 | Account | Used by | Can do |
 | --- | --- | --- |
 | `moneybot-sa` | GitHub Actions | Apply this config and submit Cloud Build. Roles are `google_project_iam_member.deployer` in [`main.tf`](infra/main.tf) |
-| `moneybot-job` | Both Cloud Run jobs | Write and query BigQuery, read the Alpaca secrets, pull the image |
+| `moneybot-job` | The Cloud Run jobs | Edit the BigQuery dataset, run query jobs, read the two Alpaca secrets, pull the image |
 | `moneybot-scheduler` | Cloud Scheduler | Call `jobs.run` |
 | Cloud Build service account | `gcloud builds submit` | Push the image, update a job, write logs, act as `moneybot-job` |
 | Scheduler service agent | Google-managed | Mint the OAuth token for `moneybot-scheduler` |
@@ -168,5 +203,4 @@ The Cloud Build account and the Scheduler agent do not exist until their APIs ha
 - The GCP project. It already exists.
 - The state bucket. The Infra workflow creates `PROJECT_ID-moneybot-tfstate` before apply.
 - Alpaca secret versions. The Infra workflow action `secrets` adds them.
-- Tables. dbt in [`dbt/`](dbt) creates a table only when it is missing.
-- The container image. [`.github/cloudbuild.yml`](.github/cloudbuild.yml) builds [`app/Dockerfile`](app/Dockerfile) with the repo root as context, so the image can copy `app/`, `src/`, and `config/`. [`.gcloudignore`](.gcloudignore) stays at the repo root because that is the directory `gcloud` uploads. It is a copy of [`.gitignore`](.gitignore). [`app/Dockerfile.dockerignore`](app/Dockerfile.dockerignore) sits next to the Dockerfile because Docker only reads `<Dockerfile>.dockerignore` for `-f app/Dockerfile`.
+- The container image. [build-service-image.yml](.github/workflows/build-service-image.yml) submits [`.github/cloudbuild.yml`](.github/cloudbuild.yml) twice at most. The context is `services/<service>`. [`services/collector/.dockerignore`](services/collector/.dockerignore) is what Docker and the image hash read. A new service adds its own Dockerfile and `.dockerignore`, and [build.yml](.github/workflows/build.yml) calls Build image with that service name. [`.gcloudignore`](.gcloudignore) stays at the repo root because that is the directory `gcloud` uploads. It is a copy of [`.gitignore`](.gitignore).

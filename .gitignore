@@ -9,21 +9,20 @@
 !.github/cloudbuild.yml
 !.github/workflows/
 !.github/workflows/*.yml
+!.github/scripts/
+!.github/scripts/*.py
 
 !config/
 !config/*.yml
 
-!app/
-!app/Dockerfile
-!app/.dockerignore
-!app/entrypoint.py
-!app/requirements.txt
-
-!src/
-!src/*.py
-
-!tests/
-!tests/*.py
+!services/
+!services/**/
+!services/**/*.py
+!services/**/*.txt
+!services/**/*.toml
+!services/**/*.yml
+!services/**/Dockerfile
+!services/**/.dockerignore
 
 !infra/
 !infra/*.tf
@@ -35,6 +34,9 @@
 !dbt/models/
 !dbt/models/*.sql
 !dbt/models/*.yml
+!dbt/models/base/
+!dbt/models/base/*.yml
+!dbt/models/base/*.sql
 !dbt/macros/
 !dbt/macros/*.sql
 

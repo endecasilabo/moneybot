@@ -1,11 +1,5 @@
 # Inputs. An empty image is how `infra` applies without creating the jobs.
 
-variable "db_tier" {
-  type        = string
-  default     = "db-f1-micro"
-  description = "Cloud SQL machine size. This tier stays on; it does not scale to zero."
-}
-
 variable "deployer_account_id" {
   type        = string
   default     = "moneybot-sa"
@@ -26,17 +20,17 @@ variable "project_id" {
 variable "region" {
   type        = string
   default     = "us-central1"
-  description = "Region for Cloud Run, Cloud SQL, Artifact Registry, and Cloud Scheduler. Scheduler must be available here."
+  description = "Region for Cloud Run, BigQuery, Artifact Registry, and Cloud Scheduler. Scheduler must be available here."
+}
+
+variable "bars_cron" {
+  type        = string
+  default     = "35 10-16 * * 1-5"
+  description = "America/New_York. Minute 35, 10:00-16:59, weekdays. Stores 1Hour SIP bars. A later run starts after the last stored bar."
 }
 
 variable "snapshot_cron" {
   type        = string
   default     = "*/15 9-16 * * 1-5"
   description = "America/New_York. Every 15 minutes, 09:00-16:59, weekdays. Read-only account snapshot."
-}
-
-variable "trade_cron" {
-  type        = string
-  default     = "*/5 12-16 * * 1-5"
-  description = "America/New_York. Every 5 minutes, 12:00-16:59, weekdays. The process itself only submits 10-20 minutes before the close."
 }

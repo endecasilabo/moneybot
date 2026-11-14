@@ -37,5 +37,14 @@ jobs:
       - name: Run unit tests
         run: |
           uv venv --python 3.12
-          uv pip install -r app/requirements.txt
-          .venv/bin/python -m unittest discover -s tests
+          fail=0
+          found=0
+          for service in services/*/; do
+            test -f "${service}requirements.txt" || continue
+            test -d "${service}tests" || continue
+            found=1
+            uv pip install -r "${service}requirements.txt"
+            PYTHONPATH="${service%/}" .venv/bin/python -m unittest discover -s "${service}tests" || fail=1
+          done
+          test "$found" = 1
+          test "$fail" = 0

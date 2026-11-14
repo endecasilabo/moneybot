@@ -1,5 +1,5 @@
 # Two applies, same config:
-#   infra — registry, Cloud SQL, empty Alpaca secrets, IAM. image is empty, so no jobs.
+#   infra — registry, BigQuery, empty Alpaca secrets, IAM. image is empty, so no jobs.
 #   jobs  — same, plus Cloud Run jobs and Scheduler once image is set.
 # Alpaca secret values are not here. The Infra workflow action secrets writes those versions.
 
@@ -8,13 +8,13 @@ data "google_project" "this" {}
 locals {
   # One entry per Cloud Run job. args is the moneybot subcommand.
   jobs = {
-    trade = {
-      args = ["trade"]
-      cron = var.trade_cron
-    }
     snapshot = {
       args = ["snapshot"]
       cron = var.snapshot_cron
+    }
+    bars = {
+      args = ["bars"]
+      cron = var.bars_cron
     }
   }
   active_jobs = { for name, job in local.jobs : name => job if var.image != "" }
@@ -27,7 +27,6 @@ locals {
   deployer_roles = toset([
     "roles/serviceusage.serviceUsageAdmin",
     "roles/storage.admin",
-    "roles/cloudsql.admin",
     "roles/bigquery.admin",
     "roles/artifactregistry.admin",
     "roles/run.admin",
@@ -49,7 +48,6 @@ resource "google_project_service" "apis" {
     "iam.googleapis.com",
     "serviceusage.googleapis.com",
     "run.googleapis.com",
-    "sqladmin.googleapis.com",
     "bigquery.googleapis.com",
     "cloudscheduler.googleapis.com",
     "secretmanager.googleapis.com",
@@ -75,7 +73,7 @@ resource "time_sleep" "ready" {
   depends_on      = [google_project_service.apis, google_project_iam_member.deployer]
 }
 
-# Cloud Build pushes bot:latest here. The job service account only pulls.
+# Cloud Build pushes {service} and {service}-bedrock here. The job service account only pulls.
 
 resource "google_artifact_registry_repository" "bot" {
   location      = var.region
@@ -84,58 +82,91 @@ resource "google_artifact_registry_repository" "bot" {
   depends_on    = [time_sleep.ready]
 }
 
-# The job connects through the Cloud SQL volume at /cloudsql, not over the public address.
-# The password lives in Secret Manager and also in this state.
+# Collector tables. The jobs write rows. dbt must not reuse these table ids.
+# base_bar column set matches dbt/models/base/base_bar.yml.
 
-resource "random_password" "db" {
-  length  = 32
-  special = false
+locals {
+  tables = {
+    runs = [
+      { name = "id", type = "STRING", mode = "REQUIRED" },
+      { name = "job", type = "STRING", mode = "REQUIRED" },
+      { name = "status", type = "STRING", mode = "REQUIRED" },
+      { name = "detail", type = "STRING" },
+      { name = "started_at", type = "TIMESTAMP", mode = "REQUIRED" },
+      { name = "finished_at", type = "TIMESTAMP" },
+    ]
+    signals = [
+      { name = "run_id", type = "STRING", mode = "REQUIRED" },
+      { name = "symbol", type = "STRING", mode = "REQUIRED" },
+      { name = "session_date", type = "DATE", mode = "REQUIRED" },
+      { name = "last_price", type = "NUMERIC", mode = "REQUIRED" },
+      { name = "sma_trend", type = "FLOAT64" },
+      { name = "sma_trend_prev", type = "FLOAT64" },
+      { name = "sma_exit", type = "FLOAT64" },
+      { name = "trend_ok", type = "BOOL", mode = "REQUIRED" },
+      { name = "pullback_ok", type = "BOOL", mode = "REQUIRED" },
+      { name = "in_position", type = "BOOL", mode = "REQUIRED" },
+      { name = "action", type = "STRING", mode = "REQUIRED" },
+      { name = "reason", type = "STRING", mode = "REQUIRED" },
+    ]
+    orders = [
+      { name = "client_order_id", type = "STRING", mode = "REQUIRED" },
+      { name = "run_id", type = "STRING", mode = "REQUIRED" },
+      { name = "alpaca_order_id", type = "STRING" },
+      { name = "symbol", type = "STRING", mode = "REQUIRED" },
+      { name = "side", type = "STRING", mode = "REQUIRED" },
+      { name = "qty", type = "INT64", mode = "REQUIRED" },
+      { name = "time_in_force", type = "STRING", mode = "REQUIRED" },
+      { name = "status", type = "STRING" },
+      { name = "filled_avg_price", type = "NUMERIC" },
+      { name = "error", type = "STRING" },
+    ]
+    account_snapshots = [
+      { name = "run_id", type = "STRING", mode = "REQUIRED" },
+      { name = "equity", type = "NUMERIC" },
+      { name = "cash", type = "NUMERIC" },
+      { name = "buying_power", type = "NUMERIC" },
+      { name = "portfolio_value", type = "NUMERIC" },
+      { name = "open_orders", type = "JSON", mode = "REQUIRED" },
+    ]
+    position_snapshots = [
+      { name = "run_id", type = "STRING", mode = "REQUIRED" },
+      { name = "symbol", type = "STRING", mode = "REQUIRED" },
+      { name = "qty", type = "NUMERIC", mode = "REQUIRED" },
+      { name = "avg_entry_price", type = "NUMERIC" },
+      { name = "market_value", type = "NUMERIC" },
+      { name = "unrealized_pl", type = "NUMERIC" },
+      { name = "current_price", type = "NUMERIC" },
+    ]
+    base_bar = [
+      { name = "id", type = "STRING", mode = "REQUIRED" },
+      { name = "symbol", type = "STRING", mode = "REQUIRED" },
+      { name = "feed", type = "STRING", mode = "REQUIRED" },
+      { name = "timeframe", type = "STRING", mode = "REQUIRED" },
+      { name = "ts", type = "TIMESTAMP", mode = "REQUIRED" },
+      { name = "open", type = "NUMERIC", mode = "REQUIRED" },
+      { name = "high", type = "NUMERIC", mode = "REQUIRED" },
+      { name = "low", type = "NUMERIC", mode = "REQUIRED" },
+      { name = "close", type = "NUMERIC", mode = "REQUIRED" },
+      { name = "volume", type = "NUMERIC", mode = "REQUIRED" },
+      { name = "trade_count", type = "INT64" },
+      { name = "vwap", type = "NUMERIC" },
+    ]
+  }
 }
 
-resource "google_sql_database_instance" "main" {
-  name                = "moneybot"
-  database_version    = "POSTGRES_16"
-  region              = var.region
+resource "google_bigquery_dataset" "bot" {
+  dataset_id = "moneybot"
+  location   = var.region
+  depends_on = [time_sleep.ready]
+}
+
+resource "google_bigquery_table" "bot" {
+  for_each            = local.tables
+  dataset_id          = google_bigquery_dataset.bot.dataset_id
+  table_id            = each.key
   deletion_protection = true
-
-  settings {
-    tier                        = var.db_tier
-    edition                     = "ENTERPRISE"
-    deletion_protection_enabled = true
-    ip_configuration {
-      ipv4_enabled = true
-    }
-  }
-
-  depends_on = [time_sleep.ready]
-}
-
-# Database and user the bot connects as. The password is the random value above.
-
-resource "google_sql_database" "bot" {
-  name     = "moneybot"
-  instance = google_sql_database_instance.main.name
-}
-
-resource "google_sql_user" "bot" {
-  name     = "moneybot"
-  instance = google_sql_database_instance.main.name
-  password = random_password.db.result
-}
-
-resource "google_secret_manager_secret" "db_password" {
-  secret_id = "moneybot-db-password"
-  replication {
-    auto {}
-  }
-  depends_on = [time_sleep.ready]
-}
-
-# Terraform writes this version. Alpaca secrets stay empty until the Infra workflow action secrets.
-
-resource "google_secret_manager_secret_version" "db_password" {
-  secret      = google_secret_manager_secret.db_password.id
-  secret_data = random_password.db.result
+  schema              = jsonencode(each.value)
 }
 
 # Empty shells. The Infra workflow action secrets writes the Alpaca versions. Terraform does not.
@@ -156,7 +187,7 @@ resource "google_secret_manager_secret" "alpaca_secret" {
   depends_on = [time_sleep.ready]
 }
 
-# job: the Cloud Run process. Reads SQL, secrets, and the image.
+# job: the Cloud Run process. Writes BigQuery, reads secrets, and pulls the image.
 # scheduler: Cloud Scheduler calls jobs.run as this account.
 
 resource "google_service_account" "job" {
@@ -171,34 +202,16 @@ resource "google_service_account" "scheduler" {
   depends_on   = [time_sleep.ready]
 }
 
-# Append-only tables, created by dbt (Infra workflow, action schema). See brain/architecture/0003-bigquery.md.
-resource "google_bigquery_dataset" "bot" {
-  dataset_id                 = "moneybot"
-  location                   = "US"
-  delete_contents_on_destroy = false
-  depends_on                 = [time_sleep.ready]
+resource "google_bigquery_dataset_iam_member" "job_editor" {
+  dataset_id = google_bigquery_dataset.bot.dataset_id
+  role       = "roles/bigquery.dataEditor"
+  member     = "serviceAccount:${google_service_account.job.email}"
 }
 
-# bigquery.user includes jobs.create, which the job needs for its queries.
 resource "google_project_iam_member" "job_bq" {
-  for_each = toset(["roles/bigquery.dataEditor", "roles/bigquery.user"])
-  project  = var.project_id
-  role     = each.value
-  member   = "serviceAccount:${google_service_account.job.email}"
-}
-
-# ponytail: Cloud SQL stays until BigQuery is verified in production. The jobs no longer use it.
-# Upgrade path: a follow-up PR removes the instance, database, user, password secret, this role and the API.
-resource "google_project_iam_member" "job_sql" {
   project = var.project_id
-  role    = "roles/cloudsql.client"
+  role    = "roles/bigquery.jobUser"
   member  = "serviceAccount:${google_service_account.job.email}"
-}
-
-resource "google_secret_manager_secret_iam_member" "job_db" {
-  secret_id = google_secret_manager_secret.db_password.id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.job.email}"
 }
 
 resource "google_secret_manager_secret_iam_member" "job_alpaca_key" {
@@ -229,7 +242,7 @@ resource "google_service_account_iam_member" "scheduler_token_creator" {
   depends_on         = [time_sleep.ready]
 }
 
-# Skipped while var.image is empty. Same image, two jobs: trade and snapshot.
+# Skipped while var.image is empty. Same image, one Cloud Run job per entry in local.jobs.
 
 resource "google_cloud_run_v2_job" "bot" {
   for_each = local.active_jobs
@@ -251,8 +264,16 @@ resource "google_cloud_run_v2_job" "bot" {
           value = "/app/config/bot.yml"
         }
         env {
+          name  = "GCP_PROJECT"
+          value = var.project_id
+        }
+        env {
           name  = "BQ_DATASET"
-          value = "${var.project_id}.${google_bigquery_dataset.bot.dataset_id}"
+          value = google_bigquery_dataset.bot.dataset_id
+        }
+        env {
+          name  = "BQ_LOCATION"
+          value = var.region
         }
         env {
           name = "ALPACA_KEY"
@@ -278,6 +299,8 @@ resource "google_cloud_run_v2_job" "bot" {
 
   depends_on = [
     time_sleep.ready,
+    google_bigquery_table.bot,
+    google_bigquery_dataset_iam_member.job_editor,
     google_project_iam_member.job_bq,
     google_secret_manager_secret_iam_member.job_alpaca_key,
     google_secret_manager_secret_iam_member.job_alpaca_secret,

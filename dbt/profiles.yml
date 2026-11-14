@@ -1,18 +1,10 @@
 moneybot:
-  target: dev
+  target: bigquery
   outputs:
-    # Local: gcloud auth application-default login. CI: the GitHub Actions service account.
-    dev:
+    bigquery:
       type: bigquery
       method: oauth
-      project: "{{ env_var('GCP_PROJECT_ID') }}"
-      dataset: moneybot_dev
-      location: US
-      threads: 1
-    prod:
-      type: bigquery
-      method: oauth
-      project: "{{ env_var('GCP_PROJECT_ID') }}"
+      project: "{{ env_var('PROJECT_ID') }}"
       dataset: moneybot
-      location: US
+      location: "{{ env_var('REGION') }}"
       threads: 1

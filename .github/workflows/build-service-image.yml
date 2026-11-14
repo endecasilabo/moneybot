@@ -1,0 +1,85 @@
+name: Build Service Image
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: Directory name under services/.
+        required: true
+        type: string
+
+jobs:
+  build:
+    name: ${{ inputs.service }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      # Tags are content hashes. A changed input is a new tag, so an existing tag is not rebuilt.
+      # bedrock_sha is only the dependency inputs. image_sha is every file in the service directory.
+      - name: Hash service inputs
+        id: hash
+        working-directory: services/${{ inputs.service }}
+        run: |
+          set -euo pipefail
+          # Assign first. echo "$(...)" would hide a failing sha256sum.
+          bedrock_sha="$(sha256sum Dockerfile requirements.txt .dockerignore | sha256sum | cut -d' ' -f1)"
+          image_sha="$(find . -type f -exec sha256sum {} + | LC_ALL=C sort | sha256sum | cut -d' ' -f1)"
+          echo "bedrock_sha=${bedrock_sha}" >> "$GITHUB_OUTPUT"
+          echo "image_sha=${image_sha}" >> "$GITHUB_OUTPUT"
+
+      # The app stage does FROM the published bedrock image, so bedrock has to be built with
+      # --target bedrock. Without that flag Docker builds the app stage and the empty ARG fails.
+      - name: Build bedrock if missing, then the app image
+        env:
+          SERVICE: ${{ inputs.service }}
+          ARTIFACT_REGISTRY_NAME: ${{ secrets.GCP_ARTIFACT_REGISTRY_NAME }}
+          REGION: ${{ secrets.GCP_REGION }}
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          BEDROCK_SHA: ${{ steps.hash.outputs.bedrock_sha }}
+          IMAGE_SHA: ${{ steps.hash.outputs.image_sha }}
+        run: |
+          set -euo pipefail
+          test -n "$SERVICE"
+          test -n "$REGION"
+          test -n "$PROJECT_ID"
+          test -n "$ARTIFACT_REGISTRY_NAME"
+          test -n "$BEDROCK_SHA"
+          test -n "$IMAGE_SHA"
+          registry="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REGISTRY_NAME}"
+          # Paths are from the repo root. -f is not resolved inside the build context.
+          dockerfile="services/${SERVICE}/Dockerfile"
+          context="services/${SERVICE}"
+          bedrock_uri="${registry}/${SERVICE}-bedrock:${BEDROCK_SHA}"
+          image_uri="${registry}/${SERVICE}:${IMAGE_SHA}"
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+          if gcloud artifacts docker images describe "$bedrock_uri" --project "$PROJECT_ID" >/dev/null 2>&1; then
+            echo "bedrock exists ${bedrock_uri}"
+          else
+            echo "building bedrock ${bedrock_uri}"
+            docker build -f "$dockerfile" --target bedrock --tag "$bedrock_uri" "$context"
+            docker push "$bedrock_uri"
+          fi
+
+          if gcloud artifacts docker images describe "$image_uri" --project "$PROJECT_ID" >/dev/null 2>&1; then
+            echo "image exists ${image_uri}"
+          else
+            echo "building image ${image_uri} from ${bedrock_uri}"
+            docker build -f "$dockerfile" \
+              --build-arg "BEDROCK_IMAGE=${bedrock_uri}" \
+              --tag "$image_uri" \
+              "$context"
+            docker push "$image_uri"
+          fi
