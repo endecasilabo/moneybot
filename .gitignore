@@ -1,11 +1,20 @@
 *
 
-# root
+# root files
 !.gitignore
 !readme.md
+!makefile
+
+# root directories
+!.pre-commit/
 !.github/
 !services/
 !infra/
+
+# pre-commit
+!.pre-commit/config.yaml
+!.pre-commit/black.toml
+!.pre-commit/.sqlfluff
 
 # github
 !.github/readme.md

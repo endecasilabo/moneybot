@@ -7,3 +7,4 @@ sources:
     tables:
       - name: runs
       - name: orders
+      - name: base_bar
