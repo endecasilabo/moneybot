@@ -12,7 +12,7 @@ En GCP (`moneybot-514003`, región `us-central1`) todo está desplegado desde `m
 | Recurso | Estado |
 | --- | --- |
 | Cloud Run jobs `moneybot-snapshot`, `moneybot-bars` | Creados, con imagen `collector:latest` |
-| Cloud Scheduler | `snapshot` `*/15 9-16 * * 1-5` **pausado** (2026-11-15) · `bars` `35 10-16 * * 1-5` activo. Ambos en `America/New_York` |
+| Cloud Scheduler | `snapshot` `*/15 9-16 * * 1-5` y `bars` `35 10-16 * * 1-5`, ambos en `America/New_York` y **pausados** (2026-11-15) |
 | BigQuery `moneybot` (US) | `runs`, `signals`, `orders`, `account_snapshots`, `position_snapshots`, `base_bar` |
 | Secret Manager | `moneybot-alpaca-key` y `moneybot-alpaca-secret`, versión 1 |
 | Cloud SQL | Eliminado |
@@ -22,10 +22,10 @@ GitHub `ALPACA_KEY` y `ALPACA_SECRET`. La clave tiene prefijo `AK` (live) y no l
 pero `GET /v2/account` devuelve **401 tanto en live como en paper**. El par está revocado o es
 incorrecto.
 
-El scheduler de `snapshot` se pausó a mano el 2026-11-15
-(`gcloud scheduler jobs pause`) porque no tiene sentido hasta que haya claves. Terraform no lo
+Los dos schedulers se pausaron a mano el 2026-11-15
+(`gcloud scheduler jobs pause`) porque no tiene sentido que corran hasta que haya claves. Terraform no lo
 reactiva: `paused` no está en `infra/main.tf` y el provider lo trata como atributo calculado.
-Mientras no se arregle, cada ejecución programada (hoy solo `bars`) deja en `moneybot.runs` una fila
+Antes de la pausa, cada ejecución dejaba en `moneybot.runs` una fila
 `status=error`, `detail={"message": "unauthorized."}`. La primera fue la prueba manual
 `b925d29c-…` del 2026-11-15 10:35 UTC. No se envía ninguna orden porque no hay servicio de trade.
 
@@ -59,9 +59,10 @@ Mientras no se arregle, cada ejecución programada (hoy solo `bars`) deja en `mo
    gcloud secrets versions disable 1 --secret moneybot-alpaca-key --project moneybot-514003
    gcloud secrets versions disable 1 --secret moneybot-alpaca-secret --project moneybot-514003
    ```
-7. Reactivar el scheduler de `snapshot`:
+7. Reactivar los schedulers:
    ```bash
    gcloud scheduler jobs resume moneybot-snapshot --location us-central1 --project moneybot-514003
+   gcloud scheduler jobs resume moneybot-bars --location us-central1 --project moneybot-514003
    ```
 8. Completar abajo la sección **Resultado** y cambiar el estado a "hecho".
 
