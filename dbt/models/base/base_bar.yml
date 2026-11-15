@@ -1,0 +1,47 @@
+version: 2
+
+models:
+  - name: base_bar
+    description: >
+      One row per bar for a symbol, feed, and timeframe.
+      Grain: one row per symbol, feed, timeframe, and bar open time.
+      The collector reads these columns when it writes the BigQuery table.
+    config:
+      tags: ['base']
+    columns:
+      - name: id
+        description: Unique identifier for the bar.
+        data_type: uuid
+      - name: symbol
+        description: Symbol of the bar.
+        data_type: string
+      - name: feed
+        description: Feed of the bar.
+        data_type: string
+      - name: timeframe
+        description: Timeframe of the bar.
+        data_type: string
+      - name: ts
+        description: Timestamp of the bar.
+        data_type: timestamp
+      - name: open
+        description: Open price of the bar.
+        data_type: numeric
+      - name: high
+        description: High price of the bar.
+        data_type: numeric
+      - name: low
+        description: Low price of the bar.
+        data_type: numeric
+      - name: close
+        description: Close price of the bar.
+        data_type: numeric
+      - name: volume
+        description: Volume of the bar.
+        data_type: numeric
+      - name: trade_count
+        description: Trade count of the bar.
+        data_type: integer
+      - name: vwap
+        description: VWAP of the bar.
+        data_type: numeric

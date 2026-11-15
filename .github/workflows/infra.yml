@@ -13,7 +13,7 @@ on:
       action:
         description: >-
           infra: create GCP resources (no jobs).
-          schema: create the Cloud SQL tables with dbt.
+          schema: run dbt against BigQuery. Tables already exist after infra.
           secrets: load Alpaca keys into Secret Manager.
           jobs: create or update Cloud Run jobs and schedulers.
         required: true
@@ -88,7 +88,7 @@ jobs:
           REGION: ${{ vars.GCP_REGION }}
         run: |
           region="${REGION:-us-central1}"
-          image="${region}-docker.pkg.dev/${PROJECT_ID}/moneybot/bot:latest"
+          image="${region}-docker.pkg.dev/${PROJECT_ID}/moneybot/collector:latest"
           terraform -chdir=infra apply -input=false -auto-approve \
             -var="project_id=${PROJECT_ID}" -var="region=${region}" -var="image=${image}"
 
@@ -114,17 +114,4 @@ jobs:
           test -n "$PROJECT_ID" || { echo "PROJECT_ID is required"; exit 1; }
           uv venv --python 3.12 dbt/.venv
           uv pip install --python dbt/.venv/bin/python -r dbt/requirements.txt
-          test -x /tmp/cloud-sql-proxy || curl -fsSL -o /tmp/cloud-sql-proxy "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.14.3/cloud-sql-proxy.linux.amd64"
-          chmod +x /tmp/cloud-sql-proxy
-          set -euo pipefail
-          db_password="$(gcloud secrets versions access latest --secret=moneybot-db-password --project "$PROJECT_ID")"
-          /tmp/cloud-sql-proxy "${PROJECT_ID}:${region}:moneybot" --port 5432 >/tmp/cloud-sql-proxy.log 2>&1 &
-          proxy_pid=$!
-          trap 'kill $proxy_pid' EXIT
-          ready=0
-          for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
-            python3 -c 'import socket; socket.create_connection(("127.0.0.1",5432),1).close()' && ready=1 && break
-            sleep 1
-          done
-          test "$ready" = 1 || { echo "cloud-sql-proxy did not open port 5432"; cat /tmp/cloud-sql-proxy.log; exit 1; }
-          DB_PASSWORD="$db_password" dbt/.venv/bin/dbt build --project-dir dbt --profiles-dir dbt
+          REGION="$region" dbt/.venv/bin/dbt build --project-dir dbt --profiles-dir dbt

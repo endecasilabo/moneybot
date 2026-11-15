@@ -1,13 +1,10 @@
 moneybot:
-  target: cloudsql
+  target: bigquery
   outputs:
-    cloudsql:
-      type: postgres
-      host: 127.0.0.1
-      port: 5432
-      user: moneybot
-      password: "{{ env_var('DB_PASSWORD') }}"
-      dbname: moneybot
-      schema: public
+    bigquery:
+      type: bigquery
+      method: oauth
+      project: "{{ env_var('PROJECT_ID') }}"
+      dataset: moneybot
+      location: "{{ env_var('BQ_LOCATION', 'US') }}"
       threads: 1
-      sslmode: disable

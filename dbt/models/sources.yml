@@ -1,0 +1,9 @@
+version: 2
+
+sources:
+  - name: collector
+    schema: moneybot
+    description: Tables Terraform creates. dbt must not declare models with these ids.
+    tables:
+      - name: runs
+      - name: orders
