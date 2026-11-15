@@ -6,5 +6,5 @@ moneybot:
       method: oauth
       project: "{{ env_var('PROJECT_ID') }}"
       dataset: moneybot
-      location: "{{ env_var('REGION') }}"
+      location: "{{ env_var('BQ_LOCATION', 'US') }}"
       threads: 1

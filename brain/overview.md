@@ -5,10 +5,13 @@ Mental model actual. Si cambia el comportamiento, actualizar esta página en la 
 
 ## Qué hace
 
-Opera SPY en una cuenta **live** de Alpaca con el patrón Scherman (ver `README.md` raíz para el
-contexto y la fuente). Un job separado solo guarda el estado de la cuenta, no decide ni opera.
+**Hoy no opera.** En Cloud Run solo existe el servicio `services/collector`, con dos jobs:
+`snapshot` (estado de la cuenta) y `bars` (barras horarias de SPY). El patrón Scherman (`decide()`)
+vive en `research/` y solo se usa en el backtest local. Volver a operar requiere un servicio
+`trade` (ver `brain/architecture/0004-servicios.md`). Debajo queda descrito cómo operaba, como
+referencia para ese servicio.
 
-## La decisión (`src/strategy.py:decide`)
+## La decisión (`research/src/strategy.py:decide`)
 
 Entrada: lista de cierres completados (`closes`), el último precio como proxy del cierre de hoy
 (`last`), y si ya hay posición (`in_position`). Pura: no toca red, DB ni reloj.
@@ -21,10 +24,10 @@ Entrada: lista de cierres completados (`closes`), el último precio como proxy d
 
 Una sola posición, tamaño fijo (`qty`, default 1), sin stop, sin margen, sin fracciones.
 
-## El pipeline (`app/entrypoint.py` → `src/jobs.py`)
+## El pipeline (`services/collector/entrypoint.py` → `src/jobs.py`)
 
 ```
-python app/entrypoint.py trade|snapshot
+python entrypoint.py snapshot|bars   # trade: eliminado en 0636179
 guarded(job, fn)
   -> load_config()        # config/bot.yml, valida mode=live, feed=sip, etc.
   -> guard_live(cfg)       # aborta si mode != live o si la URL de Alpaca es paper
@@ -44,7 +47,7 @@ Layout tras la reestructura de `dev`: ver `brain/architecture/0002-reestructura-
 - **`take_snapshot`**: lee cuenta, posiciones y órdenes abiertas de Alpaca y las guarda. No decide,
   no opera.
 
-## Los datos (BigQuery, dataset `moneybot`, modelos en `dbt/models/`)
+## Los datos (BigQuery, dataset `moneybot` en `US`; las tablas las crea Terraform, dbt solo vistas)
 
 `runs` (cada ejecución) → `signals` (qué vio y qué decidió, con los parámetros de la estrategia) →
 `orders` (qué mandó). Separado, `account_snapshots` y `position_snapshots` para el job de snapshot.
@@ -64,7 +67,9 @@ minuto u hora (con pre-market y after-hours), trades, quotes, snapshots y corpor
 `decide()` no los necesita. Los precios **no incluyen dividendos**. Detalle y ejemplo horario en
 `brain/spikes/2026-11-03-sizing-y-cartera.md`.
 
-## Backtesting local (`src/backtest.py`)
+## Backtesting local (`research/src/backtest.py`)
+
+`PYTHONPATH=research python -m unittest discover -s research/tests`.
 
 No forma parte del pipeline de Cloud Run. Es una herramienta de desarrollo con tres piezas sobre
 cualquier estrategia (`Strategy`, cualquier callable con la firma de `decide()`): `simulate`
@@ -77,7 +82,7 @@ El bot en vivo no hace eso — compra una cantidad fija de acciones (`qty`, defa
 todo el capital. Los números de retorno del backtest no son comparables 1:1 con lo que haría el
 bot real con `qty=1`.
 
-## Cartera multi-activo (`src/portfolio.py`)
+## Cartera multi-activo (`research/src/portfolio.py`)
 
 Tampoco toca Cloud Run ni `src/backtest.py`. `simulate_portfolio()` corre la misma `Strategy`
 de forma independiente por símbolo (mismo timing in/out que `simulate()`) y reparte capital entre

@@ -2,7 +2,6 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
-import os
 
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.enums import Adjustment, DataFeed
@@ -10,7 +9,7 @@ from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 from google.cloud.bigquery import Client
 
-from src.db import DB
+from src.db import DB, require_env
 
 
 class Bars:
@@ -35,15 +34,6 @@ class Bars:
         self.columns = DB.parse_schema(
             schema,
         )
-        self.key = self.require_env("ALPACA_KEY")
-        self.secret = self.require_env("ALPACA_SECRET")
-
-    @staticmethod
-    def require_env(name: str) -> str:
-        value = os.environ.get(name, "").strip()
-        if not value:
-            raise SystemExit(f"missing env {name}")
-        return value
     
     def collect(
         self,
@@ -52,8 +42,8 @@ class Bars:
     ) -> int:
         del run_id
         data = StockHistoricalDataClient(
-            self.key,
-            self.secret,
+            require_env("ALPACA_KEY"),
+            require_env("ALPACA_SECRET"),
         )
         request = StockBarsRequest(
             symbol_or_symbols=self.symbol,

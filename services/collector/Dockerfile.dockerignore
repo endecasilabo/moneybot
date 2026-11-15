@@ -1,0 +1,8 @@
+# Context is the repo root. Anything not listed stays out of the image.
+*
+
+!services/collector/entrypoint.py
+!services/collector/requirements.txt
+!services/collector/src/**/*.py
+!config/bot.yml
+!dbt/models/base/base_bar.yml

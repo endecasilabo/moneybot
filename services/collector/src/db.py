@@ -21,7 +21,7 @@ def require_env(name: str) -> str:
 def connect() -> bigquery.Client:
     project = require_env("GCP_PROJECT")
     dataset = require_env("BQ_DATASET")
-    location = os.environ.get("BQ_LOCATION", "us-central1").strip() or "us-central1"
+    location = os.environ.get("BQ_LOCATION", "US").strip() or "US"
     client = bigquery.Client(project=project, location=location)
     client.default_query_job_config = bigquery.QueryJobConfig(
         default_dataset=bigquery.DatasetReference(project, dataset),

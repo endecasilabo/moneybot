@@ -1,6 +1,8 @@
 # moneybot
 
-> Live Alpaca bot for **SPY**. It follows the market-on-close pattern Iván Scherman described publicly, and a second job only records the account. Nothing here runs on your laptop. GitHub Actions builds, migrates, and deploys it.
+> Live Alpaca bot for **SPY**. It follows the market-on-close pattern Iván Scherman described publicly. Nothing here runs on your laptop. GitHub Actions builds, migrates, and deploys it.
+
+**Today it does not trade.** The only service is `collector` (`snapshot` and `bars`). The rules below live in [`research/src/strategy.py`](research/src/strategy.py) and only the local backtest uses them. A `trade` service has to come back before any order is sent.
 
 The 491% from 2023 is the futures World Cup. Those models are not published. This repo is the close replica from the [Business Insider interview](https://www.businessinsider.com/stock-trading-strategy-quant-fund-manager-competition-champion-sp500-return-2024-9): Scherman says his fund does not trade it, and the near copy is the SPY ETF. Execution is option 1 from that note, a market-on-close order.
 
@@ -15,7 +17,7 @@ The 491% from 2023 is the futures World Cup. Those models are not published. Thi
 
 ## Rules
 
-The signal uses the last trade as today's close. The official close does not exist yet when the job decides. The auction can fill at a different price.
+These are the rules of `decide()` and of the removed trade job. The signal uses the last trade as today's close. The official close does not exist yet when the job decides. The auction can fill at a different price.
 
 | Check | Action |
 | --- | --- |
@@ -31,8 +33,6 @@ Also:
 - The same order is not sent twice. `client_order_id` is `scherman-spy-{buy|sell}-{date}`.
 - The last trade must be under 5 minutes old, and the feed must be SIP. A stale trade or an IEX close aborts the run and sends nothing.
 
-`trading_enabled` starts as `false` in [`config/bot.yml`](config/bot.yml). `false` stores the signal and does not send the order. Set it to `true`, push to `main`, and the new image picks it up.
-
 `mode` other than `live`, or `APCA_API_BASE_URL` containing `paper`, aborts the process.
 
 ## Services
@@ -41,37 +41,38 @@ There is no single app. Each runnable is a directory under `services/`, with its
 
 | Service | Path | What it runs |
 | --- | --- | --- |
-| `collector` | [`services/collector`](services/collector) | The current bot: `trade`, `snapshot`, and `bars` |
+| `collector` | [`services/collector`](services/collector) | `snapshot` and `bars`. It does not trade |
 
-`services/collector/src` is the Python package. Imports stay `src.*`. Tests live in `services/collector/tests`. From the repo root:
+`services/collector/src` is the Python package. Imports stay `src.*`. Tests live in `services/collector/tests`. [`research/`](research) holds `decide()`, the backtest, and the portfolio simulation. It is local only and has no image. CI runs both suites. From the repo root:
 
 ```bash
 PYTHONPATH=services/collector python -m unittest discover -s services/collector/tests
+PYTHONPATH=research python -m unittest discover -s research/tests
 ```
 
-The image build context is the service directory. Its `.dockerignore` allows only `entrypoint.py`, `requirements.txt`, `src/*.py`, and `src/collector/*.py`. Tests stay out of the image.
+The image build context is the repo root. [`services/collector/Dockerfile.dockerignore`](services/collector/Dockerfile.dockerignore) allows only the service's `entrypoint.py`, `requirements.txt`, `src/**/*.py`, plus `config/bot.yml` and `dbt/models/base/base_bar.yml`, which the jobs read at runtime. Tests stay out of the image.
 
 ```bash
-docker build -f services/collector/Dockerfile services/collector
+docker build -f services/collector/Dockerfile --target bedrock -t collector-bedrock .
+docker build -f services/collector/Dockerfile --build-arg BEDROCK_IMAGE=collector-bedrock .
 ```
 
-## Three jobs
+## Jobs
 
-The collector ships one image. Three Cloud Run jobs. Three Cloud Scheduler triggers in `America/New_York`.
+The collector ships one image. Two Cloud Run jobs. Two Cloud Scheduler triggers in `America/New_York`.
 
 | Job | Default cron | What it does |
 | --- | --- | --- |
-| `moneybot-trade` | `*/5 12-16 * * 1-5` | Sends the order only when the close is more than 10 and at most 20 minutes away. That covers the 16:00 ET close and the 13:00 ET early close. Outside that window it does not touch orders |
 | `moneybot-snapshot` | `*/15 9-16 * * 1-5` | Reads the account, positions, and open orders. It does not decide and it does not trade |
 | `moneybot-bars` | `35 10-16 * * 1-5` | Stores split-adjusted 1-hour SIP bars for the configured symbol. It does not decide and it does not trade. The first run starts at 2016-01-01. Later runs start after the last stored bar, so a missed run fills the gap |
 
-The crons are Terraform variables. If the trade job does not run inside the window, that session is not traded.
+The crons are Terraform variables.
 
 The picture of GCP, and which file owns which resource, is in [Infrastructure](#infrastructure).
 
 ## Data
 
-BigQuery dataset `moneybot` in the same region as the jobs. Terraform creates the tables. `deletion_protection` is true on each table, so a column change that would recreate the table stops until that flag is turned off. A dbt model must not reuse these table ids.
+BigQuery dataset `moneybot` in the `US` multi-region (`bq_location`), like every other dataset in the project. BigQuery cannot join across locations. Terraform creates the tables. `deletion_protection` is true on each table, so a column change that would recreate the table stops until that flag is turned off. A dbt model must not reuse these table ids.
 
 | Table | One row is |
 | --- | --- |
@@ -84,7 +85,7 @@ BigQuery dataset `moneybot` in the same region as the jobs. Terraform creates th
 
 ## Deploy
 
-The GCP project already exists. The default region is `us-central1`. Cloud Scheduler must be available there. BigQuery uses that same region. There is no database server to keep running.
+The GCP project already exists. The default region is `us-central1`. Cloud Scheduler must be available there. BigQuery uses `US`. There is no database server to keep running.
 
 **Warning:** If this project already has the Cloud SQL instance `moneybot`, the next `infra` apply tries to delete it. The rows in that instance are not copied into BigQuery. Deletion protection blocks the destroy. Turn the API flag off, drop the Cloud SQL resources from state, delete the instance, then apply again:
 
@@ -109,16 +110,16 @@ Create a service account named `moneybot-sa` and download the JSON. Before the f
 
 Terraform state lives in the bucket `PROJECT_ID-moneybot-tfstate`. Alpaca keys live in GitHub Secrets and in Secret Manager. There is no database password.
 
-A push to `main` runs **Deploy**. That workflow calls [test.yml](.github/workflows/test.yml), then [infra.yml](.github/workflows/infra.yml) with action `infra`, then [build.yml](.github/workflows/build.yml). Build calls [build-service-image.yml](.github/workflows/build-service-image.yml), which has no manual trigger. For `collector` it hashes `Dockerfile` and `requirements.txt`. If `collector-bedrock:<sha>` is missing, Cloud Build runs `--target bedrock`. Then it hashes the allowlisted context. If `collector:<sha>` is missing, Cloud Build runs with `BEDROCK_IMAGE` set to that bedrock URI, so a code change does not reinstall dependencies. The apply creates Artifact Registry, the BigQuery dataset and tables, Cloud Build IAM, and the empty Alpaca secrets. It does not create the jobs. If that apply fails because the Cloud Build account or the Scheduler agent does not exist yet, run **Deploy** again.
+A push to `main` runs **Deploy**. That workflow calls [test.yml](.github/workflows/test.yml), then [infra.yml](.github/workflows/infra.yml) with action `infra`, then [build.yml](.github/workflows/build.yml). Build calls [build-service-image.yml](.github/workflows/build-service-image.yml), which has no manual trigger. For `collector` it hashes `Dockerfile` and `requirements.txt`. If `collector-bedrock:<sha>` is missing, the runner builds `--target bedrock`. Then it hashes the service directory, `config/`, and `dbt/models/base/`. If `collector:<sha>` is missing, it builds with `BEDROCK_IMAGE` set to that bedrock URI, so a code change does not reinstall dependencies. Then it moves `collector:latest` to that image. The apply creates Artifact Registry, the BigQuery dataset and tables, Cloud Build IAM, and the empty Alpaca secrets. It does not create the jobs. If that apply fails because the Cloud Build account or the Scheduler agent does not exist yet, run **Deploy** again.
 
 Then, from **Actions → Infra**, in this order:
 
 1. Action `secrets`. Loads the Alpaca keys into Secret Manager.
-2. Action `jobs`. Creates `moneybot-trade`, `moneybot-snapshot`, `moneybot-bars`, and the three schedulers on `collector:latest`.
+2. Action `jobs`. Creates `moneybot-snapshot`, `moneybot-bars`, and their schedulers on `collector:latest`.
 
 Action `schema` runs dbt against BigQuery. The collector tables already exist after `infra`. A dbt model must not use the table ids `runs`, `signals`, `orders`, `account_snapshots`, `position_snapshots`, or `base_bar`.
 
-Every push and every pull request runs the tests. Every push to `main` publishes the image again. Changing [`config/bot.yml`](config/bot.yml), including `trading_enabled: true`, is a push to `main`.
+Every push and every pull request runs the tests. Every push to `main` publishes the image again. Changing [`config/bot.yml`](config/bot.yml) is a push to `main`.
 
 ## Infrastructure
 
@@ -149,9 +150,8 @@ Alpaca key values are not in Terraform. The Infra workflow action `secrets` writ
 ```mermaid
 flowchart LR
   actions[GitHub Actions]
-  build[Cloud Build]
+  build[Docker build on the runner]
   registry[Artifact Registry]
-  trade["moneybot-trade"]
   snapshot["moneybot-snapshot"]
   bars["moneybot-bars"]
   scheduler[Cloud Scheduler]
@@ -162,22 +162,14 @@ flowchart LR
 
   actions -->|"deploy"| build
   build -->|"push collector:latest"| registry
-  registry --> trade
   registry --> snapshot
   registry --> bars
-  build -->|"update job if it exists"| trade
-  build -->|"update job if it exists"| snapshot
-  build -->|"update job if it exists"| bars
-  scheduler -->|"POST jobs.run"| trade
   scheduler -->|"POST jobs.run"| snapshot
   scheduler -->|"POST jobs.run"| bars
-  secrets --> trade
   secrets --> snapshot
   secrets --> bars
-  trade --> bq
   snapshot --> bq
   bars --> bq
-  trade --> alpaca
   snapshot --> alpaca
   bars --> alpaca
   actions -->|"schema"| dbtNode
@@ -203,4 +195,4 @@ The Cloud Build account and the Scheduler agent do not exist until their APIs ha
 - The GCP project. It already exists.
 - The state bucket. The Infra workflow creates `PROJECT_ID-moneybot-tfstate` before apply.
 - Alpaca secret versions. The Infra workflow action `secrets` adds them.
-- The container image. [build-service-image.yml](.github/workflows/build-service-image.yml) submits [`.github/cloudbuild.yml`](.github/cloudbuild.yml) twice at most. The context is `services/<service>`. [`services/collector/.dockerignore`](services/collector/.dockerignore) is what Docker and the image hash read. A new service adds its own Dockerfile and `.dockerignore`, and [build.yml](.github/workflows/build.yml) calls Build image with that service name. [`.gcloudignore`](.gcloudignore) stays at the repo root because that is the directory `gcloud` uploads. It is a copy of [`.gitignore`](.gitignore).
+- The container image. [build-service-image.yml](.github/workflows/build-service-image.yml) builds it on the GitHub runner, from the repo root. A new service adds `services/<service>/Dockerfile` and its `Dockerfile.dockerignore`, and [build.yml](.github/workflows/build.yml) calls Build image with that service name. [`.github/cloudbuild.yml`](.github/cloudbuild.yml) is no longer used. [`.gcloudignore`](.gcloudignore) stays at the repo root because that is the directory `gcloud` uploads. It is a copy of [`.gitignore`](.gitignore).

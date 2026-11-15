@@ -157,7 +157,7 @@ locals {
 
 resource "google_bigquery_dataset" "bot" {
   dataset_id = "moneybot"
-  location   = var.region
+  location   = var.bq_location
   depends_on = [time_sleep.ready]
 }
 
@@ -273,7 +273,7 @@ resource "google_cloud_run_v2_job" "bot" {
         }
         env {
           name  = "BQ_LOCATION"
-          value = var.region
+          value = var.bq_location
         }
         env {
           name = "ALPACA_KEY"
