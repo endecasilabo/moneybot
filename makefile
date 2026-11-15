@@ -37,18 +37,18 @@ commit: ## Status, stage all, status, then commit as "(emoji) type - message"
 	@git add -A
 	@git status
 	@COLUMNS=20; PS3="type: "; \
-	select label in "✨ feat" "🐛 fix" "📝 doc" "🔧 core" "✅ test" "🧹 chore" "♻️ refactor" "🏗️ infra" "👷 ci"; do \
+	select label in "feat      new feature ✨" "fix       bug fix 🐛" "doc       documentation changes 📝" "core      core logic changes 🔧" "test      add or update tests ✅" "chore     maintenance and cleanup 🧹" "refactor  restructure, same behavior ♻️" "infra     infrastructure and deploy 🏗️" "ci        pipeline changes 👷"; do \
 		if [ -z "$$label" ]; then \
 			case "$$REPLY" in \
-			feat) label="✨ feat";; fix) label="🐛 fix";; doc) label="📝 doc";; core) label="🔧 core";; \
-			test) label="✅ test";; chore) label="🧹 chore";; refactor) label="♻️ refactor";; \
-			infra) label="🏗️ infra";; ci) label="👷 ci";; \
+			feat) label="feat ✨";; fix) label="fix 🐛";; doc) label="doc 📝";; core) label="core 🔧";; \
+			test) label="test ✅";; chore) label="chore 🧹";; refactor) label="refactor ♻️";; \
+			infra) label="infra 🏗️";; ci) label="ci 👷";; \
 			*) echo "pick 1-9 or a type name" >&2; continue;; \
 			esac; \
 		fi; \
 		break; \
 	done; \
 	[ -n "$$label" ] || exit 1; \
-	set -- $$label; e=$$1; type=$$2; \
+	type=$${label%% *}; e=$${label##* }; \
 	read -r -p "message: " msg; \
 	git commit -m "$$e $$type - $$msg"
