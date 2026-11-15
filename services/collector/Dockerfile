@@ -1,6 +1,8 @@
 # Build context is the repo root, so the image can carry config/ and the dbt schema the jobs read.
 # Allowlist: Dockerfile.dockerignore next to this file.
-ARG BEDROCK_IMAGE
+# Defaults to the local bedrock stage. CI passes the cached registry image instead.
+# BuildKit resolves every FROM even with --target bedrock, so this cannot be empty.
+ARG BEDROCK_IMAGE=bedrock
 
 FROM python:3.12-slim AS bedrock
 
