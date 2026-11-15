@@ -21,6 +21,15 @@ Rama: `feat/collector-fixes` (sobre el commit `0636179`)
 - `research/` no se despliega. Separarlo deja claro que el backtest no corre en Cloud Run.
 - BigQuery no permite queries entre ubicaciones distintas, así que todos los datasets van en `US`.
 
+## Deploy y jobs
+
+- El apply de `infra` que corre en cada Deploy usa `image=collector:latest` cuando esa imagen existe.
+  Con `image` vacío, Terraform destruiría los jobs y los schedulers.
+- Un job de Cloud Run fija el digest de la imagen al crearse o actualizarse. Después de cada build,
+  `build-service-image.yml` actualiza los jobs del servicio al tag `<sha>`, y el siguiente apply los
+  vuelve a dejar en `:latest`, que apunta al mismo digest.
+- El timeout se configura por job en `local.jobs`: `snapshot` 300 s, `bars` 1800 s (para el backfill).
+
 ## Pendiente
 
 - Volver a operar requiere un servicio `trade` que importe `decide()`. Hoy `decide()` vive en

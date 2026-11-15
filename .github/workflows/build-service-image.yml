@@ -85,3 +85,17 @@ jobs:
             docker push "$image_uri"
           fi
           gcloud artifacts docker tags add "$image_uri" "$latest_uri" --quiet
+
+          # A job pins the digest when it is created or updated, so moving :latest is not enough.
+          # The update uses the content tag, so the image string always changes. The next infra
+          # apply sets it back to :latest, which points at the same digest.
+          for job in $(gcloud run jobs list --region "$REGION" --project "$PROJECT_ID" --format='value(metadata.name)'); do
+            current="$(gcloud run jobs describe "$job" --region "$REGION" --project "$PROJECT_ID" \
+              --format='value(spec.template.spec.template.spec.containers[0].image)')"
+            case "$current" in
+              "${registry}/${SERVICE}:"*|"${registry}/${SERVICE}@"*)
+                echo "updating ${job} to ${image_uri}"
+                gcloud run jobs update "$job" --image "$image_uri" --region "$REGION" --project "$PROJECT_ID" --quiet
+                ;;
+            esac
+          done
