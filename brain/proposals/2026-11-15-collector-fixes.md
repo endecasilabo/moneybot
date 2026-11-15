@@ -65,6 +65,7 @@ Para el backtest, las opciones eran moverlo a `research/` (elegida), borrarlo o 
 
 - [architecture/0004-servicios.md](../architecture/0004-servicios.md).
 - Antes de mergear a `main`, tener en cuenta que el apply de `infra` intentará borrar la instancia
-  Cloud SQL `moneybot`. Seguir el procedimiento de `readme.md` → Deploy.
+  Cloud SQL `moneybot`. Procedimiento:
+  [runbooks/2026-11-15-drop-cloudsql.md](../runbooks/2026-11-15-drop-cloudsql.md).
 - `.github/cloudbuild.yml` ya no lo usa ningún workflow, porque el build corre en el runner.
   Queda pendiente borrarlo.

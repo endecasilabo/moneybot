@@ -8,6 +8,8 @@ Base de conocimiento del proyecto. Se versiona (`!brain/` en `.gitignore`). El c
 - `proposals/` — una entrada por alternativa analizada (se use o se descarte). Partí de
   `proposals/TEMPLATE.md`.
 - `reference/` — referencia de APIs externas tal como las usa el bot (p. ej. `alpaca-api.md`).
+- `runbooks/` — operaciones manuales sobre GCP que no hace Terraform ni un workflow: el script
+  que se ejecutó, su `.log` y un `.md` con el porqué y el resultado.
 - `spikes/` — exploraciones con resultados (gráficos en `spikes/img/`) que no cambian el bot
   live, pero dejan constancia de qué se probó y qué salió.
 
