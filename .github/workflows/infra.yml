@@ -78,8 +78,14 @@ jobs:
           REGION: ${{ vars.GCP_REGION }}
         run: |
           region="${REGION:-us-central1}"
+          # An empty image removes the jobs from the config, so Terraform would destroy them.
+          # Once collector:latest exists, infra applies with it and keeps the jobs.
+          image="${region}-docker.pkg.dev/${PROJECT_ID}/moneybot/collector:latest"
+          if ! gcloud artifacts docker images describe "$image" --project "$PROJECT_ID" >/dev/null 2>&1; then
+            image=""
+          fi
           terraform -chdir=infra apply -input=false -auto-approve \
-            -var="project_id=${PROJECT_ID}" -var="region=${region}"
+            -var="project_id=${PROJECT_ID}" -var="region=${region}" -var="image=${image}"
 
       - name: Terraform apply jobs
         if: inputs.action == 'jobs'

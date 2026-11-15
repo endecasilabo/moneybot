@@ -9,12 +9,15 @@ locals {
   # One entry per Cloud Run job. args is the moneybot subcommand.
   jobs = {
     snapshot = {
-      args = ["snapshot"]
-      cron = var.snapshot_cron
+      args    = ["snapshot"]
+      cron    = var.snapshot_cron
+      timeout = "300s"
     }
     bars = {
       args = ["bars"]
       cron = var.bars_cron
+      # The first run backfills hourly bars since 2016 in one execution.
+      timeout = "1800s"
     }
   }
   active_jobs = { for name, job in local.jobs : name => job if var.image != "" }
@@ -252,7 +255,7 @@ resource "google_cloud_run_v2_job" "bot" {
   template {
     template {
       service_account = google_service_account.job.email
-      timeout         = "300s"
+      timeout         = each.value.timeout
       max_retries     = 0
 
       containers {
