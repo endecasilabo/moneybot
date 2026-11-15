@@ -39,7 +39,7 @@ jobs:
           uv venv --python 3.12
           fail=0
           found=0
-          for service in services/*/; do
+          for service in services/*/ research/; do
             test -f "${service}requirements.txt" || continue
             test -d "${service}tests" || continue
             found=1

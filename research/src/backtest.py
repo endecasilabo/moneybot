@@ -1,9 +1,10 @@
+import os
 import random
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from functools import partial
-from typing import Protocol
+from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
 from alpaca.data.enums import Adjustment, DataFeed
@@ -11,11 +12,34 @@ from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 
-from src.db import require_env
-from src.jobs import bars_for, load_local_env
 from src.strategy import Decision, decide
 
 NY = ZoneInfo("America/New_York")
+
+
+def require_env(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise SystemExit(f"missing env {name}")
+    return value
+
+
+def load_local_env() -> None:
+    # python-dotenv is optional. Exported vars win over .env.
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    load_dotenv(override=False)
+
+
+def bars_for(barset: Any, symbol: str) -> list[Any]:
+    data = getattr(barset, "data", None)
+    if isinstance(data, dict) and symbol in data:
+        return list(data[symbol])
+    if isinstance(barset, dict) and symbol in barset:
+        return list(barset[symbol])
+    raise RuntimeError(f"no bars for {symbol}")
 
 Side = str  # "buy" | "sell"
 # A strategy is anything that looks at completed history + today's proxy + current position

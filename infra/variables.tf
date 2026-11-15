@@ -20,7 +20,13 @@ variable "project_id" {
 variable "region" {
   type        = string
   default     = "us-central1"
-  description = "Region for Cloud Run, BigQuery, Artifact Registry, and Cloud Scheduler. Scheduler must be available here."
+  description = "Region for Cloud Run, Artifact Registry, and Cloud Scheduler. Scheduler must be available here."
+}
+
+variable "bq_location" {
+  type        = string
+  default     = "US"
+  description = "BigQuery location. Every dataset in the project is in US, and BigQuery cannot join across locations."
 }
 
 variable "bars_cron" {

@@ -12,7 +12,7 @@ on:
     inputs:
       action:
         description: >-
-            infra: create GCP resources (no jobs).
+          infra: create GCP resources (no jobs).
           schema: run dbt against BigQuery. Tables already exist after infra.
           secrets: load Alpaca keys into Secret Manager.
           jobs: create or update Cloud Run jobs and schedulers.

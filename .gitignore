@@ -22,7 +22,7 @@
 !services/**/*.toml
 !services/**/*.yml
 !services/**/Dockerfile
-!services/**/.dockerignore
+!services/**/Dockerfile.dockerignore
 
 !infra/
 !infra/*.tf
@@ -40,7 +40,10 @@
 !dbt/macros/
 !dbt/macros/*.sql
 
-!requirements-dev.txt
+!research/
+!research/**/
+!research/**/*.py
+!research/requirements.txt
 
 !brain/
 !brain/**
