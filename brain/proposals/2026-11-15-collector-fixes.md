@@ -2,7 +2,7 @@
 
 Estado: aceptada
 Rama: `feat/collector-fixes`
-PR: pendiente
+PR: https://github.com/frandiegoacosta/moneybot/pull/9
 
 ## Problema
 
