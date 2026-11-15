@@ -53,8 +53,7 @@ PYTHONPATH=research python -m unittest discover -s research/tests
 The image build context is the repo root. [`services/collector/Dockerfile.dockerignore`](services/collector/Dockerfile.dockerignore) allows only the service's `entrypoint.py`, `requirements.txt`, `src/**/*.py`, plus `config/bot.yml` and `dbt/models/base/base_bar.yml`, which the jobs read at runtime. Tests stay out of the image.
 
 ```bash
-docker build -f services/collector/Dockerfile --target bedrock -t collector-bedrock .
-docker build -f services/collector/Dockerfile --build-arg BEDROCK_IMAGE=collector-bedrock .
+docker build -f services/collector/Dockerfile .
 ```
 
 ## Jobs
