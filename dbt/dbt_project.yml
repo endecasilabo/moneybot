@@ -10,3 +10,14 @@ clean-targets: ["target", "dbt_packages", "logs"]
 models:
   moneybot:
     +materialized: view
+    # shortcut: these are raw CREATE TABLE drafts from the BigQuery design (brain/proposals/2026-11-11-bigquery.md).
+    # Their macro table_if_absent was removed when Terraform took over the tables, so they are off.
+    # Upgrade path: declare the table in infra/main.tf (local.tables) or rewrite as a real select model.
+    assets:
+      +enabled: false
+    bars:
+      +enabled: false
+    order_intents:
+      +enabled: false
+    order_intents_latest:
+      +enabled: false

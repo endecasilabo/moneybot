@@ -4,9 +4,9 @@
 !.gitignore
 !.gcloudignore
 !readme.md
+!AGENTS.md
 
 !.github/
-!.github/cloudbuild.yml
 !.github/workflows/
 !.github/workflows/*.yml
 !.github/scripts/

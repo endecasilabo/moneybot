@@ -5,6 +5,9 @@ Mental model actual. Si cambia el comportamiento, actualizar esta página en la 
 
 ## Qué hace
 
+**Pendiente al 2026-11-15:** las claves de Alpaca dan 401, así que todo run termina en `error`. Ver
+`brain/runbooks/2026-11-15-handoff-alpaca.md`.
+
 **Hoy no opera.** En Cloud Run solo existe el servicio `services/collector`, con dos jobs:
 `snapshot` (estado de la cuenta) y `bars` (barras horarias de SPY). El patrón Scherman (`decide()`)
 vive en `research/` y solo se usa en el backtest local. Volver a operar requiere un servicio
@@ -49,13 +52,12 @@ Layout tras la reestructura de `dev`: ver `brain/architecture/0002-reestructura-
 
 ## Los datos (BigQuery, dataset `moneybot` en `US`; las tablas las crea Terraform, dbt solo vistas)
 
-`runs` (cada ejecución) → `signals` (qué vio y qué decidió, con los parámetros de la estrategia) →
-`orders` (qué mandó). Separado, `account_snapshots` y `position_snapshots` para el job de snapshot.
-Ya creadas para lo que viene: `bars`, `assets` y `order_intents`.
-
-**Todo es solo añadir**: un cambio de estado es una fila nueva, nunca un `UPDATE`. El estado actual
-sale de las vistas `runs_latest`, `orders_latest` y `order_intents_latest`. Los ids son UUID. El job
-se identifica con su cuenta de servicio y lee el dataset de `BQ_DATASET` (`<proyecto>.<dataset>`).
+Terraform crea las tablas (`infra/main.tf`, `local.tables`). `runs` tiene una fila por ejecución:
+`start_run` la inserta y `finish_run` la actualiza con `UPDATE`. `account_snapshots` y
+`position_snapshots` las escribe `snapshot`, y `base_bar` la escribe `bars` (columnas en
+`dbt/models/base/base_bar.yml`). `signals` y `orders` están creadas para el futuro servicio `trade`,
+pero hoy nada escribe en ellas. dbt no construye modelos: los borradores `bars`, `assets` y
+`order_intents` están desactivados en `dbt/dbt_project.yml`. El job lee el dataset de `BQ_DATASET`.
 Detalle y motivos en `brain/architecture/0003-bigquery.md`. Para pruebas locales:
 `BQ_DATASET=moneybot-514003.moneybot_dev` y `dbt build` (target `dev` por defecto).
 

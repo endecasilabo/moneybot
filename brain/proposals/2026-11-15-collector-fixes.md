@@ -67,5 +67,6 @@ Para el backtest, las opciones eran moverlo a `research/` (elegida), borrarlo o 
 - Antes de mergear a `main`, tener en cuenta que el apply de `infra` intentará borrar la instancia
   Cloud SQL `moneybot`. Procedimiento:
   [runbooks/2026-11-15-drop-cloudsql.md](../runbooks/2026-11-15-drop-cloudsql.md).
-- `.github/cloudbuild.yml` ya no lo usa ningún workflow, porque el build corre en el runner.
-  Queda pendiente borrarlo.
+- `.github/cloudbuild.yml` se borró en `fix/deploy-keeps-jobs`, porque ningún workflow lo usaba.
+- Traspaso de las claves de Alpaca, que dan 401:
+  [runbooks/2026-11-15-handoff-alpaca.md](../runbooks/2026-11-15-handoff-alpaca.md).
