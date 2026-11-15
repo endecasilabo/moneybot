@@ -1,5 +1,0 @@
-# Local only: backtest and portfolio simulation. Not installed in any image.
--r ../services/collector/requirements.txt
-python-dotenv>=1.0
-matplotlib>=3.9
-plotly>=5.24

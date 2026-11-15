@@ -1,49 +1,37 @@
-# Ignore everything. Re-include the directory before the files inside it.
 *
 
+# root
 !.gitignore
-!.gcloudignore
 !readme.md
-!AGENTS.md
-
 !.github/
+!services/
+!infra/
+
+# github
+!.github/readme.md
 !.github/workflows/
 !.github/workflows/*.yml
-!.github/scripts/
-!.github/scripts/*.py
 
-!config/
-!config/*.yml
-
-!services/
+# services
 !services/**/
-!services/**/*.py
-!services/**/*.txt
-!services/**/*.toml
-!services/**/*.yml
+!services/**/readme.md
 !services/**/Dockerfile
-!services/**/Dockerfile.dockerignore
+!services/**/.dockerignore
+!services/**/entrypoint.py
+!services/**/requirements.txt
+!services/**/src/
+!services/**/src/*.py
+!services/**/src/**/*.py
+!services/**/tests/
+!services/**/tests/*.py
+!services/**/dbt/
+!services/**/dbt/dbt_project.yml
+!services/**/dbt/profiles.yml
+!services/**/dbt/models/
+!services/**/dbt/models/**/*.sql
+!services/**/dbt/models/**/*.yml
 
-!infra/
+# infra
 !infra/*.tf
+!infra/readme.md
 
-!dbt/
-!dbt/dbt_project.yml
-!dbt/profiles.yml
-!dbt/requirements.txt
-!dbt/models/
-!dbt/models/*.sql
-!dbt/models/*.yml
-!dbt/models/base/
-!dbt/models/base/*.yml
-!dbt/models/base/*.sql
-!dbt/macros/
-!dbt/macros/*.sql
-
-!research/
-!research/**/
-!research/**/*.py
-!research/requirements.txt
-
-!brain/
-!brain/**
