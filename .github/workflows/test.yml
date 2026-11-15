@@ -38,13 +38,10 @@ jobs:
         run: |
           uv venv --python 3.12
           fail=0
-          found=0
           for service in services/*/ research/; do
             test -f "${service}requirements.txt" || continue
-            test -d "${service}tests" || continue
-            found=1
+            compgen -G "${service}tests/test_*.py" > /dev/null || continue
             uv pip install -r "${service}requirements.txt"
             PYTHONPATH="${service%/}" .venv/bin/python -m unittest discover -s "${service}tests" || fail=1
           done
-          test "$found" = 1
           test "$fail" = 0

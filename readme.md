@@ -43,11 +43,7 @@ There is no single app. Each runnable is a directory under `services/`, with its
 | --- | --- | --- |
 | `data` | [`services/data`](services/data) | `snapshot` and `bars`. It does not trade |
 
-`services/data/src` is the Python package. Imports stay `src.*`. Tests live in `services/data/tests`. CI runs the tests on every push and pull request. From the repo root:
-
-```bash
-PYTHONPATH=services/data python -m unittest discover -s services/data/tests
-```
+`services/data/src` is the Python package. Imports stay `src.*`. CI runs a service's unit tests only when that service has `tests/test_*.py`.
 
 The directory and code say `data`. The image, the Cloud Run jobs, and the workflow `service:` input still say `collector` in [`infra/`](infra) and [`.github/workflows/`](.github/workflows). Those names are unchanged here until the rename lands.
 
@@ -119,7 +115,7 @@ Then, from **Actions → Infra**, in this order:
 
 Action `schema` runs dbt against BigQuery. The tables already exist after `infra`. A dbt model must not use the table ids `runs`, `signals`, `orders`, `account_snapshots`, `position_snapshots`, or `base_bar`.
 
-Every push and every pull request runs the tests. Every push to `main` publishes the image again. Changing `config/bot.yml` is a push to `main`. That file is not in the tree after `d15b751`. The jobs read it through `BOT_CONFIG` and refuse to run without `mode: live` and `feed: sip`, so it has to be back before the image runs.
+Every push and every pull request runs the test workflow. A service with no `tests/test_*.py` is skipped. Every push to `main` publishes the image again. Changing `config/bot.yml` is a push to `main`. That file is not in the tree after `d15b751`. The jobs read it through `BOT_CONFIG` and refuse to run without `mode: live` and `feed: sip`, so it has to be back before the image runs.
 
 ## Infrastructure
 

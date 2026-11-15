@@ -1,4 +1,4 @@
-.PHONY: help init git
+.PHONY: help init git test commit
 
 ifeq ($(OS),Windows_NT)
 DETECTED_OS := windows
@@ -32,10 +32,24 @@ endif
 	@pre-commit --version
 	@pre-commit install --config .pre-commit/config.yaml
 
-commit: ## Status, stage all, status, then commit as "(emoji) type - message"
+test: ## Unit tests for services with changed files
+	@fail=0; \
+	services=$$({ git diff --name-only HEAD; git ls-files --others --exclude-standard; } | awk -F/ '$$1=="services" && $$2!="" {print $$2}' | sort -u); \
+	for service in $$services; do \
+		dir="services/$$service"; \
+		test -f "$$dir/requirements.txt" || continue; \
+		compgen -G "$$dir/tests/test_*.py" > /dev/null || continue; \
+		test -x .venv/bin/python || { echo "missing .venv"; exit 1; }; \
+		echo "test $$dir"; \
+		PYTHONPATH="$$dir" .venv/bin/python -m unittest discover -s "$$dir/tests" || fail=1; \
+	done; \
+	test "$$fail" = 0
+
+commit: ## Status, stage all, test changed services, then commit as "(emoji) type - message"
 	@git status
-	@git add -A
+	@if git diff --cached --quiet; then git add -A; else echo "staged files found, skipping git add"; fi
 	@git status
+	@$(MAKE) --no-print-directory test
 	@COLUMNS=20; PS3="type: "; \
 	select label in "feat      new feature ✨" "fix       bug fix 🐛" "doc       documentation changes 📝" "core      core logic changes 🔧" "test      add or update tests ✅" "chore     maintenance and cleanup 🧹" "refactor  restructure, same behavior ♻️" "infra     infrastructure and deploy 🏗️" "ci        pipeline changes 👷"; do \
 		if [ -z "$$label" ]; then \
