@@ -1,0 +1,11 @@
+repos:
+  - repo: https://github.com/psf/black-pre-commit-mirror
+    rev: 26.10.1
+    hooks:
+      - id: black
+        args: [--config=.pre-commit/black.toml]
+  - repo: https://github.com/sqlfluff/sqlfluff
+    rev: 4.5.0
+    hooks:
+      - id: sqlfluff-lint
+        args: [--config, .pre-commit/.sqlfluff]

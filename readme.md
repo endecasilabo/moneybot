@@ -2,7 +2,7 @@
 
 > Live Alpaca bot for **SPY**. It follows the market-on-close pattern Iván Scherman described publicly. Nothing here runs on your laptop. GitHub Actions builds, migrates, and deploys it.
 
-**Today it does not trade.** The only service is `collector` (`snapshot` and `bars`). The rules below live in [`research/src/strategy.py`](research/src/strategy.py) and only the local backtest uses them. A `trade` service has to come back before any order is sent.
+**Today it does not trade.** The only service is `data` (`snapshot` and `bars`). The rules below were in `research/src/strategy.py` and only the local backtest used them. That code was removed in `d15b751` and is still in git history. A `trade` service has to come back before any order is sent.
 
 The 491% from 2023 is the futures World Cup. Those models are not published. This repo is the close replica from the [Business Insider interview](https://www.businessinsider.com/stock-trading-strategy-quant-fund-manager-competition-champion-sp500-return-2024-9): Scherman says his fund does not trade it, and the near copy is the SPY ETF. Execution is option 1 from that note, a market-on-close order.
 
@@ -10,7 +10,7 @@ The 491% from 2023 is the futures World Cup. Those models are not published. Thi
 
 - [Rules](#rules)
 - [Services](#services)
-- [Three jobs](#three-jobs)
+- [Jobs](#jobs)
 - [Data](#data)
 - [Deploy](#deploy)
 - [Infrastructure](#infrastructure)
@@ -37,28 +37,25 @@ Also:
 
 ## Services
 
-There is no single app. Each runnable is a directory under `services/`, with its own entrypoint, requirements, `src` package, and `.dockerignore`. Shared `config/` and `dbt/` stay at the repo root.
+There is no single app. Each runnable is a directory under `services/`, with its own entrypoint, requirements, `src` package, and `.dockerignore`. The dbt project lives in the service that owns it, at `services/data/dbt`.
 
 | Service | Path | What it runs |
 | --- | --- | --- |
-| `collector` | [`services/collector`](services/collector) | `snapshot` and `bars`. It does not trade |
+| `data` | [`services/data`](services/data) | `snapshot` and `bars`. It does not trade |
 
-`services/collector/src` is the Python package. Imports stay `src.*`. Tests live in `services/collector/tests`. [`research/`](research) holds `decide()`, the backtest, and the portfolio simulation. It is local only and has no image. CI runs both suites. From the repo root:
+`services/data/src` is the Python package. Imports stay `src.*`. CI runs a service's unit tests only when that service has `tests/test_*.py`.
 
-```bash
-PYTHONPATH=services/collector python -m unittest discover -s services/collector/tests
-PYTHONPATH=research python -m unittest discover -s research/tests
-```
+The directory and code say `data`. The image, the Cloud Run jobs, and the workflow `service:` input still say `collector` in [`infra/`](infra) and [`.github/workflows/`](.github/workflows). Those names are unchanged here until the rename lands.
 
-The image build context is the repo root. [`services/collector/Dockerfile.dockerignore`](services/collector/Dockerfile.dockerignore) allows only the service's `entrypoint.py`, `requirements.txt`, `src/**/*.py`, plus `config/bot.yml` and `dbt/models/base/base_bar.yml`, which the jobs read at runtime. Tests stay out of the image.
+The image build context is the repo root. [`services/data/.dockerignore`](services/data/.dockerignore) allows only the service's `entrypoint.py`, `requirements.txt`, and `src/**/*.py`. The jobs also read `config/bot.yml` and `dbt/models/base/base_bar.yml` at runtime. Tests stay out of the image.
 
 ```bash
-docker build -f services/collector/Dockerfile .
+docker build -f services/data/Dockerfile .
 ```
 
 ## Jobs
 
-The collector ships one image. Two Cloud Run jobs. Two Cloud Scheduler triggers in `America/New_York`.
+The `data` service ships one image. Two Cloud Run jobs. Two Cloud Scheduler triggers in `America/New_York`.
 
 | Job | Default cron | What it does |
 | --- | --- | --- |
@@ -80,7 +77,7 @@ BigQuery dataset `moneybot` in the `US` multi-region (`bq_location`), like every
 | `orders` | A `cls` order sent to Alpaca. `client_order_id` is the key the job merges on |
 | `account_snapshots` | Equity, cash, buying power, and open orders |
 | `position_snapshots` | One open position |
-| `base_bar` | One split-adjusted bar. The collector reads the column list from [`dbt/models/base/base_bar.yml`](dbt/models/base/base_bar.yml). The lookup key is symbol, feed, timeframe, and the bar open time |
+| `base_bar` | One split-adjusted bar. The `bars` job reads the column list from [`services/data/dbt/models/base/base_bar.yml`](services/data/dbt/models/base/base_bar.yml). The lookup key is symbol, feed, timeframe, and the bar open time |
 
 ## Deploy
 
@@ -116,9 +113,9 @@ Then, from **Actions → Infra**, in this order:
 1. Action `secrets`. Loads the Alpaca keys into Secret Manager.
 2. Action `jobs`. Creates `moneybot-snapshot`, `moneybot-bars`, and their schedulers on `collector:latest`.
 
-Action `schema` runs dbt against BigQuery. The collector tables already exist after `infra`. A dbt model must not use the table ids `runs`, `signals`, `orders`, `account_snapshots`, `position_snapshots`, or `base_bar`.
+Action `schema` runs dbt against BigQuery. The tables already exist after `infra`. A dbt model must not use the table ids `runs`, `signals`, `orders`, `account_snapshots`, `position_snapshots`, or `base_bar`.
 
-Every push and every pull request runs the tests. Every push to `main` publishes the image again. Changing [`config/bot.yml`](config/bot.yml) is a push to `main`.
+Every push and every pull request runs the test workflow. A service with no `tests/test_*.py` is skipped. Every push to `main` publishes the image again. Changing `config/bot.yml` is a push to `main`. That file is not in the tree after `d15b751`. The jobs read it through `BOT_CONFIG` and refuse to run without `mode: live` and `feed: sip`, so it has to be back before the image runs.
 
 ## Infrastructure
 
@@ -194,4 +191,4 @@ The Cloud Build account and the Scheduler agent do not exist until their APIs ha
 - The GCP project. It already exists.
 - The state bucket. The Infra workflow creates `PROJECT_ID-moneybot-tfstate` before apply.
 - Alpaca secret versions. The Infra workflow action `secrets` adds them.
-- The container image. [build-service-image.yml](.github/workflows/build-service-image.yml) builds it on the GitHub runner, from the repo root. A new service adds `services/<service>/Dockerfile` and its `Dockerfile.dockerignore`, and [build.yml](.github/workflows/build.yml) calls Build image with that service name. [`.gcloudignore`](.gcloudignore) stays at the repo root because that is the directory `gcloud` uploads. It is a copy of [`.gitignore`](.gitignore).
+- The container image. [build-service-image.yml](.github/workflows/build-service-image.yml) builds it on the GitHub runner, from the repo root. A new service adds `services/<service>/Dockerfile` and its `.dockerignore`, and [build.yml](.github/workflows/build.yml) calls Build image with that service name.

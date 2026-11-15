@@ -1,0 +1,9 @@
+# Context is the repo root. Anything not listed stays out of the image.
+*
+
+!entrypoint.py
+!requirements.txt
+!src/
+!src/*.py
+!src/**/*.py
+

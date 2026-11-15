@@ -1,4 +1,0 @@
-# Live only. A paper URL, or mode other than live, aborts the process.
-mode: live
-symbol: SPY
-feed: sip
